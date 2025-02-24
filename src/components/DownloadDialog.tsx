@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { getLastUploadedFile } from "./FileUpload";
+import { getLastUploadedFile } from "@/components/FileUpload";
 
 export const DownloadDialog = () => {
   const [format, setFormat] = useState<string>("pdf");

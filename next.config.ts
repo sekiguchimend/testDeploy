@@ -1,7 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  swcMinify: false, // Minify による問題を回避
   experimental: {
-    serverComponentsExternalPackages: ["pdf-parse"],
+    serverComponentsExternalPackages: ["pdfjs-dist", "pdf-parse"],
   },
 };
 

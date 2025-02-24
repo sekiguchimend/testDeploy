@@ -1,106 +1,154 @@
 import { NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { PDFDocument } from "pdf-lib";
-import { Document, Packer, Paragraph, TextRun } from "docx";
 import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
+import { z } from "zod";
 
-// Google Generative AI の設定
-const apiKey = process.env.GEMINI_API_KEY;
-if (!apiKey) {
-  throw new Error("GEMINI_API_KEY が設定されていません。");
+// 環境変数の検証
+const envSchema = z.object({
+  GEMINI_API_KEY: z.string().min(1),
+});
+
+const env = envSchema.safeParse({
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY,
+});
+
+if (!env.success) {
+  throw new Error("Missing or invalid environment variables");
 }
-const genAI = new GoogleGenerativeAI(apiKey);
+
+const genAI = new GoogleGenerativeAI(env.data.GEMINI_API_KEY);
+
+// ファイルタイプの検証
+const ALLOWED_TYPES = [
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+] as const;
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+class FileProcessingError extends Error {
+  constructor(message: string, public statusCode: number = 400) {
+    super(message);
+    this.name = "FileProcessingError";
+  }
+}
+
+// Wordファイルからテキストと形式情報を抽出
+async function extractWordContent(buffer: Buffer) {
+  try {
+    // テキストの抽出
+    const textResult = await mammoth.extractRawText({ buffer });
+    // HTMLの抽出（スタイル情報を含む）
+    const htmlResult = await mammoth.convertToHtml({ buffer });
+    
+    return {
+      text: textResult.value,
+      html: htmlResult.value,
+      // 元のドキュメント構造も保持
+      originalBuffer: buffer,
+    };
+  } catch (error) {
+    throw new FileProcessingError("Wordファイルの解析に失敗しました", 500);
+  }
+}
+
+// PDFからテキストを抽出
+async function extractPdfContent(buffer: Buffer) {
+  try {
+    const pdfData = await pdfParse(buffer);
+    return {
+      text: pdfData.text,
+      originalBuffer: buffer,
+    };
+  } catch (error) {
+    throw new FileProcessingError("PDFファイルの解析に失敗しました", 500);
+  }
+}
 
 export async function POST(req: Request) {
   try {
-    // FormData を取得
     const formData = await req.formData();
     const file = formData.get("file") as File;
-    
+
+    // ファイルの検証
     if (!file) {
-      return NextResponse.json({ error: "ファイルがありません" }, { status: 400 });
+      throw new FileProcessingError("ファイルがアップロードされていません");
     }
-    
-    const fileType = file.type;
-    // ファイルバッファを取得（Buffer に変換）
+
+    if (!ALLOWED_TYPES.includes(file.type as any)) {
+      throw new FileProcessingError("無効なファイル形式です。PDFまたはWordファイルをアップロードしてください");
+    }
+
+    if (file.size > MAX_FILE_SIZE) {
+      throw new FileProcessingError("ファイルサイズが大きすぎます (最大10MB)");
+    }
+
     const fileBuffer = Buffer.from(await file.arrayBuffer());
-    let text: string;
-    
-    // ファイルタイプに応じたテキスト抽出
-    if (fileType === "application/pdf") {
-      const pdfData = await pdfParse(fileBuffer);
-      text = pdfData.text.trim();
-      if (!text) {
-        throw new Error("PDFからテキストを抽出できませんでした");
-      }
-    } else if (
-      fileType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      fileType === "application/msword"
-    ) {
-      const extractedText = await mammoth.extractRawText({ buffer: fileBuffer });
-      text = extractedText.value.trim();
-      if (!text) {
-        throw new Error("Wordファイルからテキストを抽出できませんでした");
-      }
+    let content;
+
+    // ファイルタイプに応じた処理
+    if (file.type === "application/pdf") {
+      content = await extractPdfContent(fileBuffer);
     } else {
-      return NextResponse.json(
-        { error: "PDFまたはWordファイルをアップロードしてください" },
-        { status: 400 }
-      );
+      content = await extractWordContent(fileBuffer);
     }
+
+    if (!content.text.trim()) {
+      throw new FileProcessingError("ファイルからテキストを抽出できませんでした");
+    }
+
+    // AIによる添削
+    const prompt = `以下の職務経歴書を添削してください。
+    注意点：
+    - 元の文章構造は維持してください
+    - 具体的な成果や数値を強調してください
+    - 曖昧な表現は具体的に修正してください
+    - 誤字脱字を修正してください
+    - 元の文章と同じか少し多いくらいの文章量にしてください
     
-    // Gemini API で添削（プロンプトを生成してリクエスト）
-    const prompt = `次の文章を添削してください。添削結果はファイル形式で返してください:\n\n${text}`;
-    const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-    const result = await model.generateContent(prompt);
+    原文:
+    ${content.text}`;
 
-    // Gemini APIのレスポンスをログに出力
-    console.log("Gemini API response:", result.response);
+    try {
+      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const correctedText = response.text();
 
-    // レスポンスが空の場合
-    if (!result.response || Object.keys(result.response).length === 0) {
-      console.error("Gemini APIからのレスポンスが空です");
-      return NextResponse.json(
-        { error: "Gemini APIからのレスポンスが空です" },
-        { status: 500 }
-      );
-    }
-
-    // Gemini API が返した結果がファイル形式であることを確認
-    if (result.response?.file) {
-      // 修正されたファイル（バイナリデータ）を取得
-      const correctedFileBuffer = result.response.file;
-
-      // ファイルタイプに応じた出力
-      if (fileType === "application/pdf") {
-        return new NextResponse(correctedFileBuffer, {
-          headers: {
-            "Content-Disposition": "attachment; filename=\"corrected_document.pdf\"",
-            "Content-Type": "application/pdf",
-          },
+      // Wordファイルの場合
+      if ('html' in content) {
+        return NextResponse.json({
+          originalText: content.html, // 元のHTML形式を保持
+          correctedText: correctedText, // 添削されたテキスト
+          fileType: "word",
         });
-      } else if (fileType === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || fileType === "application/msword") {
-        return new NextResponse(correctedFileBuffer, {
-          headers: {
-            "Content-Disposition": "attachment; filename=\"corrected_document.docx\"",
-            "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          },
+      } 
+      // PDFの場合
+      else {
+        return NextResponse.json({
+          originalText: content.text,
+          correctedText: correctedText,
+          fileType: "pdf",
         });
       }
-    } else if (typeof result.response?.text === "function") {
-      // `text`が関数の場合、その関数を実行して結果を取得
-      const correctedText = await result.response.text();
-      return NextResponse.json({ text: correctedText });
-    } else {
-      console.error("添削結果がファイル形式でも文字列でもありません");
-      throw new Error("添削結果がファイル形式でも文字列でもありません");
-    }
 
+    } catch (error) {
+      throw new FileProcessingError("AI処理中にエラーが発生しました", 500);
+    }
   } catch (error) {
-    console.error("Server Error:", error);
+    console.error("Error processing file:", error);
+    
+    if (error instanceof FileProcessingError) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: error.statusCode }
+      );
+    }
+
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "サーバーエラーが発生しました" },
+      { error: "予期せぬエラーが発生しました" },
       { status: 500 }
     );
   }
