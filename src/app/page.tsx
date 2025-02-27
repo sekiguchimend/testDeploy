@@ -54,7 +54,9 @@ const Index = () => {
           )}
 
           {/* ダウンロードダイアログ */}
+          {showComparison &&(
           <DownloadDialog />
+          )}
         </div>
       </main>
     </div>

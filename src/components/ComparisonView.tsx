@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
-import { ArrowLeft, ArrowRight, FileText, RotateCcw } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { ArrowLeftRight, Download, FileText, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -13,23 +13,85 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import * as diff from 'diff';
 
 interface ComparisonViewProps {
   originalText: string;
   correctedText: string;
+  onDownload?: () => void;
 }
-
-// PDF の判定
-const isPDF = (text: string) => text.includes("%PDF");
 
 export const ComparisonView: React.FC<ComparisonViewProps> = ({
   originalText,
   correctedText,
+  onDownload
 }) => {
-  const [showDiff, setShowDiff] = useState(true);
   const [reReviewComment, setReReviewComment] = useState("");
   const [showReReviewDialog, setShowReReviewDialog] = useState(false);
+  const [markedOriginalText, setMarkedOriginalText] = useState("");
+  const [markedCorrectedText, setMarkedCorrectedText] = useState("");
   const { toast } = useToast();
+
+  useEffect(() => {
+    // 差分を計算して視覚的なマーカーを追加
+    highlightDifferences();
+  }, [originalText, correctedText]);
+
+  const highlightDifferences = () => {
+    // テキストデータからHTMLタグを除去してプレーンテキストとして比較
+    const cleanOriginal = originalText.replace(/<[^>]*>/g, '');
+    const cleanCorrected = correctedText.replace(/<[^>]*>/g, '');
+
+    // 段落ごとに分割
+    const originalParagraphs = cleanOriginal.split('\n\n');
+    const correctedParagraphs = cleanCorrected.split('\n\n');
+
+    let markedOriginal = '';
+    let markedCorrected = '';
+
+    // 最大の長さを取得
+    const maxLength = Math.max(originalParagraphs.length, correctedParagraphs.length);
+
+    for (let i = 0; i < maxLength; i++) {
+      const origPara = originalParagraphs[i] || '';
+      const corrPara = correctedParagraphs[i] || '';
+
+      if (origPara === corrPara) {
+        // 変更がない場合は通常のテキストとして追加
+        markedOriginal += `<p>${origPara}</p>`;
+        markedCorrected += `<p>${corrPara}</p>`;
+      } else {
+        // 差分を計算
+        const differences = diff.diffWords(origPara, corrPara);
+
+        // 原文に削除マーカーを追加
+        let paraWithDeleteMarkers = '';
+        differences.forEach(part => {
+          if (part.removed) {
+            paraWithDeleteMarkers += `<mark class="bg-red-100">${part.value}</mark>`;
+          } else if (!part.added) {
+            paraWithDeleteMarkers += part.value;
+          }
+        });
+        
+        // 添削文に追加マーカーを追加
+        let paraWithAddMarkers = '';
+        differences.forEach(part => {
+          if (part.added) {
+            paraWithAddMarkers += `<mark class="bg-green-100">${part.value}</mark>`;
+          } else if (!part.removed) {
+            paraWithAddMarkers += part.value;
+          }
+        });
+
+        markedOriginal += `<p>${paraWithDeleteMarkers}</p>`;
+        markedCorrected += `<p>${paraWithAddMarkers}</p>`;
+      }
+    }
+
+    setMarkedOriginalText(markedOriginal);
+    setMarkedCorrectedText(markedCorrected);
+  };
 
   const handleReReviewSubmit = () => {
     toast({
@@ -40,27 +102,42 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({
     setReReviewComment("");
   };
 
+  // PDFかどうかを判定する関数
+  const isPDF = (text: string) => {
+    // PDFの内容を示す特徴的な文字列パターンで判定
+    const pdfPatterns = [
+      "%PDF-", // PDFヘッダー
+      "Adobe PDF",
+      "application/pdf"
+    ];
+    
+    return pdfPatterns.some(pattern => text.includes(pattern));
+  };
+
   return (
-    <div className="w-full max-w-screen-xl mx-auto p-6 animate-fadeIn">
+    <div className="w-full mx-auto p-6 animate-fadeIn bg-white rounded-lg shadow-sm">
       {/* ヘッダー */}
-      <div className="flex justify-between items-center mb-8">
+      <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
           <FileText className="w-6 h-6 text-primary" />
-          <h2 className="text-2xl font-bold tracking-tight">職務経歴書の比較</h2>
+          <h2 className="text-2xl font-bold tracking-tight">職務経歴書の添削結果</h2>
         </div>
-        <div className="flex items-center space-x-4">
-          <Button
-            variant="outline"
-            onClick={() => setShowDiff(!showDiff)}
-            className="flex items-center space-x-2 hover:bg-gray-50"
-          >
-            {showDiff ? <ArrowLeft className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
-            <span>{showDiff ? "変更を非表示" : "変更を表示"}</span>
-          </Button>
+        <div className="flex items-center space-x-3">
+          {onDownload && (
+            <Button 
+              onClick={onDownload}
+              variant="default"
+              className="flex items-center space-x-2"
+            >
+              <Download className="w-4 h-4" />
+              <span>添削済みファイルをダウンロード</span>
+            </Button>
+          )}
+          
           {/* 再添削ダイアログ */}
           <Dialog open={showReReviewDialog} onOpenChange={setShowReReviewDialog}>
             <DialogTrigger asChild>
-              <Button variant="outline" className="flex items-center space-x-2 hover:bg-gray-50">
+              <Button variant="outline" className="flex items-center space-x-2">
                 <RotateCcw className="w-4 h-4" />
                 <span>再添削を依頼</span>
               </Button>
@@ -104,7 +181,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({
             {isPDF(originalText) ? (
               <span>PDFファイルが含まれています。</span>
             ) : (
-              <div dangerouslySetInnerHTML={{ __html: originalText }} />
+              <div dangerouslySetInnerHTML={{ __html: markedOriginalText || originalText }} />
             )}
           </div>
         </div>
@@ -118,7 +195,7 @@ export const ComparisonView: React.FC<ComparisonViewProps> = ({
             {isPDF(correctedText) ? (
               <span>PDFファイルが含まれています。</span>
             ) : (
-              <div dangerouslySetInnerHTML={{ __html: correctedText }} />
+              <div dangerouslySetInnerHTML={{ __html: markedCorrectedText || correctedText }} />
             )}
           </div>
         </div>

@@ -1,5 +1,5 @@
 "use client"
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Download, FileText, File, FileDown } from "lucide-react";
 import {
   Dialog,
@@ -27,16 +27,52 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { getLastUploadedFile } from "@/components/FileUpload";
 
-export const DownloadDialog = () => {
+// フォーマット間の変換を行うユーティリティ関数
+const formatFileSize = (sizeInBytes: number): string => {
+  if (sizeInBytes < 1024) return `${sizeInBytes} B`;
+  if (sizeInBytes < 1024 * 1024) return `${(sizeInBytes / 1024).toFixed(2)} KB`;
+  return `${(sizeInBytes / 1024 / 1024).toFixed(2)} MB`;
+};
+
+interface DownloadDialogProps {
+  downloadUrl?: string;
+  downloadFileName?: string;
+  pdfDownloadUrl?: string;
+  fileData?: {
+    name: string;
+    size: number;
+    type: string;
+  };
+}
+
+export const DownloadDialog: React.FC<DownloadDialogProps> = ({
+  downloadUrl,
+  downloadFileName,
+  pdfDownloadUrl,
+  fileData
+}) => {
   const [format, setFormat] = useState<string>("pdf");
   const [showConfirm, setShowConfirm] = useState(false);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
   const { toast } = useToast();
 
+  // ダウンロード可能なファイルがあるかどうかを確認
+  const hasDownloadableFile = !!(downloadUrl || pdfDownloadUrl);
+
+  // 選択されたフォーマットに対応するURLを取得
+  const getDownloadUrlForFormat = (): string => {
+    if (format === "pdf" && pdfDownloadUrl) {
+      return pdfDownloadUrl;
+    }
+    // デフォルトはテキスト/Word形式
+    return downloadUrl || "";
+  };
+
   const handleDownload = () => {
-    const file = getLastUploadedFile();
-    if (!file) {
+    const downloadUrlForFormat = getDownloadUrlForFormat();
+    
+    if (!downloadUrlForFormat) {
       toast({
         title: "エラー",
         description: "ダウンロード可能なファイルがありません。先に職務経歴書をアップロードしてください。",
@@ -45,28 +81,36 @@ export const DownloadDialog = () => {
       return;
     }
 
-    console.log(`ダウンロードを開始: ${format}形式`, file.name);
+    console.log(`ダウンロードを開始: ${format}形式`);
     toast({
       title: "ダウンロードを開始しました",
       description: `添削済み履歴書を${format.toUpperCase()}形式でダウンロードしています。`,
     });
     setShowConfirm(false);
+    setIsDialogOpen(false);
 
-    // ここで実際のダウンロード処理を実装
-    const url = URL.createObjectURL(file);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `添削済み_${file.name.split('.')[0]}.${format}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // 実際のファイルダウンロード処理
+    window.location.href = downloadUrlForFormat;
   };
 
   return (
-    <Dialog>
+    <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
       <DialogTrigger asChild>
-        <Button className="gap-2 bg-gradient-to-r from-primary/90 to-primary hover:from-primary hover:to-primary/90 transition-all duration-300 shadow-lg hover:shadow-xl px-6 py-6 rounded-xl animate-fadeIn">
+        <Button 
+          className="gap-2 bg-gradient-to-r from-primary/90 to-primary hover:from-primary hover:to-primary/90 transition-all duration-300 shadow-lg hover:shadow-xl px-6 py-6 rounded-xl animate-fadeIn"
+          disabled={!hasDownloadableFile}
+          onClick={() => {
+            if (!hasDownloadableFile) {
+              toast({
+                title: "エラー",
+                description: "ダウンロード可能なファイルがありません。先に職務経歴書をアップロードしてください。",
+                variant: "destructive",
+              });
+            } else {
+              setIsDialogOpen(true);
+            }
+          }}
+        >
           <Download className="w-5 h-5" />
           添削済み履歴書をダウンロード
         </Button>
@@ -83,19 +127,19 @@ export const DownloadDialog = () => {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="pdf">
+                <SelectItem value="pdf" disabled={!pdfDownloadUrl}>
                   <div className="flex items-center gap-2">
                     <FileText className="w-4 h-4" />
                     PDF形式
                   </div>
                 </SelectItem>
-                <SelectItem value="docx">
+                <SelectItem value="docx" disabled={!downloadUrl}>
                   <div className="flex items-center gap-2">
                     <File className="w-4 h-4" />
                     Word形式 (.docx)
                   </div>
                 </SelectItem>
-                <SelectItem value="txt">
+                <SelectItem value="txt" disabled={!downloadUrl}>
                   <div className="flex items-center gap-2">
                     <FileDown className="w-4 h-4" />
                     テキスト形式 (.txt)
@@ -108,17 +152,17 @@ export const DownloadDialog = () => {
           <div className="space-y-2">
             <label className="text-sm font-medium">プレビュー</label>
             <div className="border rounded-lg p-4 bg-gray-50 min-h-[200px] relative">
-              {getLastUploadedFile() ? (
+              {fileData ? (
                 <div className="flex flex-col items-center justify-center h-full">
                   <FileText className="w-12 h-12 text-primary mb-2" />
-                  <p className="text-sm text-gray-600">{getLastUploadedFile()?.name}</p>
+                  <p className="text-sm text-gray-600">{fileData.name || downloadFileName || "添削済みファイル"}</p>
                   <p className="text-xs text-gray-400 mt-1">
-                    サイズ: {(getLastUploadedFile()?.size / 1024 / 1024).toFixed(2)} MB
+                    サイズ: {fileData.size ? formatFileSize(fileData.size) : "不明"}
                   </p>
                 </div>
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-                  アップロードされたファイルがありません
+                  ファイル情報を読み込めませんでした
                 </div>
               )}
             </div>
@@ -127,7 +171,7 @@ export const DownloadDialog = () => {
           <Button 
             className="w-full gap-2" 
             onClick={() => setShowConfirm(true)}
-            disabled={!getLastUploadedFile()}
+            disabled={!getDownloadUrlForFormat()}
           >
             <Download className="w-4 h-4" />
             この形式でダウンロード

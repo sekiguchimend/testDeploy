@@ -1,155 +1,188 @@
-import { NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import pdfParse from "pdf-parse";
-import mammoth from "mammoth";
-import { z } from "zod";
+import { NextRequest, NextResponse } from "next/server";
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { v4 as uuidv4 } from 'uuid';
+import { processFile, reviewTextWithGemini, updateFileWithReviewedText, convertToPdfWithLibreOffice } from "@/lib/file-processor";
 
-// 環境変数の検証
-const envSchema = z.object({
-  GEMINI_API_KEY: z.string().min(1),
-});
+// 一時ディレクトリのパス
+const TEMP_DIR = path.join(os.tmpdir(), 'file-processor');
 
-const env = envSchema.safeParse({
-  GEMINI_API_KEY: process.env.GEMINI_API_KEY,
-});
-
-if (!env.success) {
-  throw new Error("Missing or invalid environment variables");
+// 一時ディレクトリが存在しない場合は作成
+if (!fs.existsSync(TEMP_DIR)) {
+  fs.mkdirSync(TEMP_DIR, { recursive: true });
 }
-
-const genAI = new GoogleGenerativeAI(env.data.GEMINI_API_KEY);
 
 // ファイルタイプの検証
 const ALLOWED_TYPES = [
   "application/pdf",
   "application/msword",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-] as const;
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.oasis.opendocument.text",
+  "text/plain" // テキストファイルも許可
+];
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
-class FileProcessingError extends Error {
-  constructor(message: string, public statusCode: number = 400) {
-    super(message);
-    this.name = "FileProcessingError";
-  }
-}
-
-// Wordファイルからテキストと形式情報を抽出
-async function extractWordContent(buffer: Buffer) {
-  try {
-    // テキストの抽出
-    const textResult = await mammoth.extractRawText({ buffer });
-    // HTMLの抽出（スタイル情報を含む）
-    const htmlResult = await mammoth.convertToHtml({ buffer });
-    
-    return {
-      text: textResult.value,
-      html: htmlResult.value,
-      // 元のドキュメント構造も保持
-      originalBuffer: buffer,
-    };
-  } catch (error) {
-    throw new FileProcessingError("Wordファイルの解析に失敗しました", 500);
-  }
-}
-
-// PDFからテキストを抽出
-async function extractPdfContent(buffer: Buffer) {
-  try {
-    const pdfData = await pdfParse(buffer);
-    return {
-      text: pdfData.text,
-      originalBuffer: buffer,
-    };
-  } catch (error) {
-    throw new FileProcessingError("PDFファイルの解析に失敗しました", 500);
-  }
-}
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File;
+    
+    // デザイン情報を抽出するかどうかのフラグ
+    const extractDesign = formData.get("extractDesign") === "true";
 
     // ファイルの検証
     if (!file) {
-      throw new FileProcessingError("ファイルがアップロードされていません");
+      return NextResponse.json(
+        { error: "ファイルがアップロードされていません" },
+        { status: 400 }
+      );
     }
 
-    if (!ALLOWED_TYPES.includes(file.type as any)) {
-      throw new FileProcessingError("無効なファイル形式です。PDFまたはWordファイルをアップロードしてください");
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      return NextResponse.json(
+        { error: "無効なファイル形式です。PDF、Word、ODT、テキストファイルのみ対応しています" },
+        { status: 400 }
+      );
     }
 
     if (file.size > MAX_FILE_SIZE) {
-      throw new FileProcessingError("ファイルサイズが大きすぎます (最大10MB)");
+      return NextResponse.json(
+        { error: "ファイルサイズが大きすぎます (最大10MB)" },
+        { status: 400 }
+      );
     }
 
-    const fileBuffer = Buffer.from(await file.arrayBuffer());
-    let content;
-
-    // ファイルタイプに応じた処理
-    if (file.type === "application/pdf") {
-      content = await extractPdfContent(fileBuffer);
-    } else {
-      content = await extractWordContent(fileBuffer);
-    }
-
-    if (!content.text.trim()) {
-      throw new FileProcessingError("ファイルからテキストを抽出できませんでした");
-    }
-
-    // AIによる添削
-    const prompt = `以下の職務経歴書を添削してください。
-    注意点：
-    - 元の文章構造は維持してください
-    - 具体的な成果や数値を強調してください
-    - 曖昧な表現は具体的に修正してください
-    - 誤字脱字を修正してください
-    - 元の文章と同じか少し多いくらいの文章量にしてください
-    
-    原文:
-    ${content.text}`;
+    // ファイルを一時ディレクトリに保存
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const fileName = file.name;
+    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_${fileName}`);
+    fs.writeFileSync(tempFilePath, buffer);
 
     try {
-      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const correctedText = response.text();
+      // ファイルを処理（デザイン情報抽出フラグを渡す）
+      const processedFile = await processFile(tempFilePath, extractDesign);
 
-      // Wordファイルの場合
-      if ('html' in content) {
-        return NextResponse.json({
-          originalText: content.html, // 元のHTML形式を保持
-          correctedText: correctedText, // 添削されたテキスト
-          fileType: "word",
-        });
-      } 
-      // PDFの場合
-      else {
-        return NextResponse.json({
-          originalText: content.text,
-          correctedText: correctedText,
-          fileType: "pdf",
-        });
+      // テキストの添削（デザイン情報があれば利用）
+      console.log("テキスト添削を開始します...");
+      const correctedText = await reviewTextWithGemini(processedFile.originalText, processedFile.designInfo);
+      console.log("テキスト添削が完了しました");
+
+      // 添削されたテキストでファイルを更新
+      const reviewedFilePath = await updateFileWithReviewedText(correctedText, processedFile);
+      
+      // 結果のダウンロード情報
+      let downloadInfo = {
+        textFilePath: reviewedFilePath,
+        pdfFilePath: null as string | null
+      };
+      
+      // PDFに変換（テキストファイルとWordファイルの場合）
+      if (file.type === 'text/plain' || 
+          file.type === 'application/msword' || 
+          file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+          file.type === 'application/vnd.oasis.opendocument.text') {
+        try {
+          const pdfPath = await convertToPdfWithLibreOffice(reviewedFilePath);
+          downloadInfo.pdfFilePath = pdfPath;
+        } catch (pdfError) {
+          console.warn("PDFへの変換中にエラーが発生しました:", pdfError);
+          // PDF変換の失敗はプロセス全体を停止させない
+        }
       }
 
-    } catch (error) {
-      throw new FileProcessingError("AI処理中にエラーが発生しました", 500);
+      // 結果を返す
+      const downloadFileName = `reviewed_${fileName}`;
+      const response: any = {
+        originalText: processedFile.originalText,
+        correctedText: correctedText,
+        fileType: processedFile.fileType.replace('.', ''),
+        downloadUrl: `/api/download?file=${encodeURIComponent(path.basename(reviewedFilePath))}`,
+        downloadFileName: downloadFileName
+      };
+      
+      // デザイン情報を抽出した場合はレスポンスに追加
+      if (extractDesign && processedFile.designInfo) {
+        response.designInfo = processedFile.designInfo;
+      }
+      
+      // PDF変換が成功した場合はダウンロードURLを追加
+      if (downloadInfo.pdfFilePath) {
+        response.pdfDownloadUrl = `/api/download?file=${encodeURIComponent(path.basename(downloadInfo.pdfFilePath))}&type=pdf`;
+      }
+
+      return NextResponse.json(response);
+    } catch (processError) {
+      // 一時ファイルを削除（エラー処理）
+      try {
+        if (fs.existsSync(tempFilePath)) {
+          fs.unlinkSync(tempFilePath);
+        }
+      } catch (cleanupError) {
+        console.error("一時ファイル削除中にエラーが発生:", cleanupError);
+      }
+
+      throw processError; // 元のエラーを再スロー
     }
   } catch (error) {
     console.error("Error processing file:", error);
     
-    if (error instanceof FileProcessingError) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: error.statusCode }
-      );
+    // エラーメッセージをより詳細に
+    let errorMessage = "予期せぬエラーが発生しました";
+    if (error instanceof Error) {
+      errorMessage = error.message;
     }
+    
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
+  }
+}
 
-    return NextResponse.json(
-      { error: "予期せぬエラーが発生しました" },
-      { status: 500 }
-    );
+// 添削結果ファイルのダウンロード用のエンドポイント
+export async function GET(req: NextRequest) {
+  try {
+    const url = new URL(req.url);
+    const fileParam = url.searchParams.get('file');
+    const fileType = url.searchParams.get('type') || 'text';
+    
+    if (!fileParam) {
+      return NextResponse.json({ error: "ファイル名が指定されていません" }, { status: 400 });
+    }
+    
+    // ファイル名にパスが含まれていないことを確認（セキュリティ対策）
+    if (fileParam.includes('/') || fileParam.includes('\\')) {
+      return NextResponse.json({ error: "無効なファイル名です" }, { status: 400 });
+    }
+    
+    const filePath = path.join(TEMP_DIR, fileParam);
+    
+    if (!fs.existsSync(filePath)) {
+      return NextResponse.json({ error: "ファイルが見つかりません" }, { status: 404 });
+    }
+    
+    const fileBuffer = fs.readFileSync(filePath);
+    
+    // コンテンツタイプを設定
+    let contentType = 'text/plain';
+    if (fileType === 'pdf') {
+      contentType = 'application/pdf';
+    } else if (path.extname(filePath).toLowerCase() === '.docx') {
+      contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    } else if (path.extname(filePath).toLowerCase() === '.doc') {
+      contentType = 'application/msword';
+    }
+    
+    // レスポンスを作成
+    const response = new NextResponse(fileBuffer, {
+      headers: {
+        'Content-Type': contentType,
+        'Content-Disposition': `attachment; filename="${fileParam}"`,
+      },
+    });
+    
+    return response;
+  } catch (error) {
+    console.error("Error downloading file:", error);
+    return NextResponse.json({ error: "ファイルのダウンロード中にエラーが発生しました" }, { status: 500 });
   }
 }
