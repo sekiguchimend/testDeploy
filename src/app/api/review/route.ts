@@ -70,8 +70,16 @@ export async function POST(req: NextRequest) {
         processedFile.originalText, 
         extractDesign
       );
-      const correctedText = result.correctedText || result;
+
+      // Geminiからの返り値をチェック
+      const correctedText = result.correctedText || ""; // デフォルト値を設定
       const designInfo = result.designInfo;
+
+      // correctedText が空文字の場合のエラーチェック
+      if (!correctedText) {
+        throw new Error("テキストの添削に失敗しました。");
+      }
+
       console.log("テキスト添削が完了しました");
 
       // 添削されたテキストでファイルを更新

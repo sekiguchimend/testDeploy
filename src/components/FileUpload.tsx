@@ -1,14 +1,25 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { FileText, Upload, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import  ComparisonView  from "./ComparisonView";
+import ComparisonView from "./ComparisonView";
 import { DownloadDialog } from "./DownloadDialog";
 
-export const FileUpload = () => {
+// コンポーネントのプロパティ型を定義
+interface FileUploadProps {
+  onFileProcessed?: (data: {
+    originalText: string;
+    correctedText: string;
+    designInfo?: any;
+    downloadUrl: string;
+    pdfDownloadUrl?: string;
+  }) => void;
+}
+
+export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingStage, setProcessingStage] = useState("");
@@ -18,6 +29,8 @@ export const FileUpload = () => {
     correctedText: string;
     downloadUrl?: string;
     downloadFileName?: string;
+    designInfo?: any;
+    pdfDownloadUrl?: string;
   } | null>(null);
   const [fileInfo, setFileInfo] = useState<{
     reviewedFilePath?: string;
@@ -27,6 +40,19 @@ export const FileUpload = () => {
   }>({});
 
   const { toast } = useToast();
+
+  // onFileProcessedコールバックが変更されたら、processedDataに基づいて呼び出す
+  useEffect(() => {
+    if (onFileProcessed && processedData) {
+      onFileProcessed({
+        originalText: processedData.originalText,
+        correctedText: processedData.correctedText,
+        designInfo: processedData.designInfo,
+        downloadUrl: processedData.downloadUrl || '',
+        pdfDownloadUrl: processedData.pdfDownloadUrl
+      });
+    }
+  }, [onFileProcessed, processedData]);
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -100,16 +126,18 @@ export const FileUpload = () => {
         }
 
         // 処理結果を設定
-        setProcessedData({
+        const processedDataResult = {
           originalText: data.originalText,
           correctedText: data.correctedText,
           downloadUrl: data.downloadUrl,
-          downloadFileName: data.downloadFileName
-        });
+          downloadFileName: data.downloadFileName,
+          designInfo: data.designInfo,
+          pdfDownloadUrl: data.pdfDownloadUrl
+        };
+
+        setProcessedData(processedDataResult);
 
         // ダウンロード用のファイル情報を設定
-        // ここでAPIレスポンスからプロパティを取得
-        // APIによって返されるプロパティ名が異なる可能性があるため、適宜調整
         setFileInfo({
           reviewedFilePath: data.reviewedFilePath || data.downloadFileName,
           originalWithDesignPath: data.originalWithDesignPath,
@@ -189,17 +217,6 @@ export const FileUpload = () => {
                 fileSize={fileInfo.fileSize}
               />
             )}
-            
-            {/* ダウンロードダイアログが利用できない場合のフォールバック */}
-            {/* {processedData.downloadUrl && !fileInfo.reviewedFilePath && (
-              <Button 
-                onClick={handleDownload}
-                className="flex items-center space-x-2"
-              >
-                <Download className="w-4 h-4" />
-                <span>添削済みファイルをダウンロード</span>
-              </Button>
-            )} */}
             
             <Button 
               variant="outline" 

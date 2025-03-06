@@ -29,9 +29,13 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useMemo } from "react";
 import dynamic from "next/dynamic";
+import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "docx";
 
 // docxライブラリは動的にインポート
-const DocxModule = dynamic(() => import("docx"), { ssr: false });
+// const DocxModule = dynamic(() => import("docx"), { ssr: false });
+
+
+
 
 
 // フォーマット間の変換を行うユーティリティ関数
@@ -164,7 +168,7 @@ export const DownloadDialog: React.FC<DownloadDialogProps> = ({
     try {
       // jsPDFをインポート
       const jsPDFModule = await import('jspdf');
-      const { jsPDF } = jsPDFModule.default;
+      const jsPDF = jsPDFModule.default;
       
       // PDFドキュメントを作成
       const doc = new jsPDF();

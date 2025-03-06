@@ -2,30 +2,36 @@
 
 import { useState } from "react";
 import { FileUpload } from "@/components/FileUpload";
-import  ComparisonView  from "@/components/ComparisonView";
-import { DownloadDialog } from "@/components/DownloadDialog";
+import ComparisonView from "@/components/ComparisonView";
+// import { DownloadDialog } from "@/components/DownloadDialog";
+
+// FileProcessedDataの型を定義
+interface FileProcessedData {
+  originalText: string;
+  correctedText: string;
+  designInfo: any;
+  downloadUrl: string;
+  pdfDownloadUrl?: string; // pdfDownloadUrl は存在しない場合もある
+}
 
 const Index = () => {
   const [originalText, setOriginalText] = useState<string>("");
   const [correctedText, setCorrectedText] = useState<string>("");
   const [designInfo, setDesignInfo] = useState<any>(null);
   const [downloadUrl, setDownloadUrl] = useState<string>("");
-  const [pdfDownloadUrl, setPdfDownloadUrl] = useState<string>("");
+  const [pdfDownloadUrl, setPdfDownloadUrl] = useState<string | null>(null); // pdfDownloadUrlがnullでも扱えるように
   const [showComparison, setShowComparison] = useState<boolean>(false);
 
   // ファイル処理後にオリジナルと添削後のテキストをセットする
-  const handleFileProcessed = (data: any) => {
+  const handleFileProcessed = (data: FileProcessedData) => {
     setOriginalText(data.originalText);
     setCorrectedText(data.correctedText);
     setDesignInfo(data.designInfo);
     setDownloadUrl(data.downloadUrl);
     if (data.pdfDownloadUrl) {
       setPdfDownloadUrl(data.pdfDownloadUrl);
-    }
-    if(data.designInfo){
-      console.log("あるよ")
-    }else{
-      console.log("ない")
+    } else {
+      setPdfDownloadUrl(null); // pdfDownloadUrl がない場合は null をセット
     }
     setShowComparison(true); // 比較表示を有効にする
   };
@@ -56,7 +62,14 @@ const Index = () => {
           </div>
 
           {/* ファイルアップロードコンポーネント */}
-          <FileUpload onFileProcessed={handleFileProcessed} />
+          <FileUpload 
+  onFileProcessed={(data) => {
+    // ファイル処理後のデータを処理
+    setOriginalText(data.originalText);
+    setCorrectedText(data.correctedText);
+    // 他の処理...
+  }} 
+/>
 
           {/* 比較表示 */}
           {showComparison && (
@@ -67,18 +80,17 @@ const Index = () => {
                 designInfo={designInfo}
               />
             </div>
-            
           )}
 
           {/* ダウンロードダイアログ */}
-          {showComparison && (
+          {/* {showComparison && (
             <div className="mt-8">
               <DownloadDialog 
                 downloadUrl={downloadUrl}
-                pdfDownloadUrl={pdfDownloadUrl}
+                pdfDownloadUrl={pdfDownloadUrl || ""} // nullの場合は空文字を渡す
               />
             </div>
-          )}
+          )} */}
         </div>
       </main>
     </div>
