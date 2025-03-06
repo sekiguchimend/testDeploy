@@ -3,10 +3,6 @@
       "app/api/**/*.ts": {
         "maxDuration": 60,
         "memory": 1024
-      },
-      "lib/*.ts": {
-        "maxDuration": 60,
-        "memory": 1024
       }
     }
   }
