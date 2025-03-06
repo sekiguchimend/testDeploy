@@ -23,7 +23,7 @@ import {
 } from "recharts";
 import { Settings, Check, X, Edit2, FileText, Download } from "lucide-react";
 import { ChartContainer, ChartTooltip } from "@/components/ui/chart";
-import { useToast } from "@/hooks/use-toast";
+// import { useToast } from "@/hooks/use-toast";
 
 const data = [
   { name: "1月", uploads: 40 },
@@ -48,7 +48,7 @@ const mockResumes = [
 ];
 
 export default function AdminDashboard() {
-  const { toast } = useToast();
+  // const { toast } = useToast();
   const [keywords, setKeywords] = useState<Keyword[]>([
     { id: 1, keyword: "機密情報", action: "添削対象外" },
     { id: 2, keyword: "個人情報", action: "添削対象外" },
@@ -69,10 +69,11 @@ export default function AdminDashboard() {
         { id: newId, keyword: newKeyword, action: "要確認" },
       ]);
       setNewKeyword("");
-      toast({
-        title: "キーワードを追加しました",
-        description: `"${newKeyword}"を追加しました。`,
-      });
+      // toast({
+      //   title: "キーワードを追加しました",
+      //   description: `"${newKeyword}"を追加しました。`,
+      // });
+      console.log("キーワードを追加しました")
     }
   };
 
@@ -97,10 +98,11 @@ export default function AdminDashboard() {
       )
     );
     setEditingKeyword({ id: null, keyword: "", action: "" });
-    toast({
-      title: "変更を保存しました",
-      description: "キーワードの設定を更新しました。",
-    });
+    // toast({
+    //   title: "変更を保存しました",
+    //   description: "キーワードの設定を更新しました。",
+    // });
+    console.log("キーワードの設定を更新しました")
   };
 
   const cancelEdit = () => {
@@ -109,17 +111,19 @@ export default function AdminDashboard() {
 
   const deleteKeyword = (id: number) => {
     setKeywords(keywords.filter((k) => k.id !== id));
-    toast({
-      title: "キーワードを削除しました",
-      variant: "destructive",
-    });
+    // toast({
+    //   title: "キーワードを削除しました",
+    //   variant: "destructive",
+    // });
+    console.log("キーワードを削除しました")
   };
 
   const handleDownload = (id: number) => {
-    toast({
-      title: "ダウンロードを開始しました",
-      description: "職務経歴書のダウンロードを開始します。",
-    });
+    // toast({
+    //   title: "ダウンロードを開始しました",
+    //   description: "職務経歴書のダウンロードを開始します。",
+    // });
+    console.log("職務経歴書のダウンロードを開始します。")
   };
 
   return (

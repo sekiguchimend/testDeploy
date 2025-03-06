@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, JSX } from 'react';
 // import * as diff from 'diff';
 const diff = require('diff')
 import { convertCorrectedDocumentToFile, downloadBlob } from './documentConverter';
@@ -583,23 +583,32 @@ const ComparisonView: React.FC<ComparisonViewProps> = ({
       const origTokens = tokenize(origText);
       const corrTokens = tokenize(corrText);
       
-      const tokenDiffs = diff.diffArrays(origTokens, corrTokens);
       
       const origDiffParts: DiffPart[] = [];
       const corrDiffParts: DiffPart[] = [];
       
-      tokenDiffs.forEach(part => {
-        const text = part.value.join('');
-        
-        if (part.added) {
-          corrDiffParts.push({ text, type: 'added' });
-        } else if (part.removed) {
-          origDiffParts.push({ text, type: 'removed' });
-        } else {
-          origDiffParts.push({ text, type: 'unchanged' });
-          corrDiffParts.push({ text, type: 'unchanged' });
-        }
-      });
+     // diff.jsの型定義を追加
+interface DiffResult<T> {
+  value: T[];
+  added?: boolean;
+  removed?: boolean;
+}
+
+// compareDocumentsHighAccuracy関数内で型を明示
+const tokenDiffs: DiffResult<string>[] = diff.diffArrays(origTokens, corrTokens);
+
+tokenDiffs.forEach((part: DiffResult<string>) => {
+  const text = part.value.join('');
+  
+  if (part.added) {
+    corrDiffParts.push({ text, type: 'added' });
+  } else if (part.removed) {
+    origDiffParts.push({ text, type: 'removed' });
+  } else {
+    origDiffParts.push({ text, type: 'unchanged' });
+    corrDiffParts.push({ text, type: 'unchanged' });
+  }
+});
       
       origResult[match.origIdx].diffParts = origDiffParts;
       corrResult[match.corrIdx].diffParts = corrDiffParts;

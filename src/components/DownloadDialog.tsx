@@ -26,7 +26,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/hooks/use-toast";
+// import { useToast } from "@/hooks/use-toast";
 import { useMemo } from "react";
 import dynamic from "next/dynamic";
 import { Document, Packer, Paragraph, TextRun, HeadingLevel } from "docx";
@@ -109,7 +109,7 @@ export const DownloadDialog: React.FC<DownloadDialogProps> = ({
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isLibraryLoading, setIsLibraryLoading] = useState(false);
-  const { toast } = useToast();
+  // const { toast } = useToast();
 
   // ダウンロード可能なファイルがあるかどうかを確認
   const hasReviewedFile = !!reviewedFilePath || !!downloadUrl;
@@ -285,11 +285,12 @@ export const DownloadDialog: React.FC<DownloadDialogProps> = ({
     const filename = getDownloadFileName();
     
     if (!downloadUrl) {
-      toast({
-        title: "エラー",
-        description: "ダウンロード可能なファイルがありません。先に職務経歴書をアップロードしてください。",
-        variant: "destructive",
-      });
+      // toast({
+      //   title: "エラー",
+      //   description: "ダウンロード可能なファイルがありません。先に職務経歴書をアップロードしてください。",
+      //   variant: "destructive",
+      // });
+      console.log("ダウンロード可能なファイルがありません。先に職務経歴書をアップロードしてください。")
       return;
     }
 
@@ -325,10 +326,11 @@ export const DownloadDialog: React.FC<DownloadDialogProps> = ({
         link.remove();
         window.URL.revokeObjectURL(url);
         
-        toast({
-          title: "ダウンロード完了",
-          description: `${filename}のダウンロードが完了しました。`,
-        });
+        // toast({
+        //   title: "ダウンロード完了",
+        //   description: `${filename}のダウンロードが完了しました。`,
+        // });
+        console.log(`${filename}のダウンロードが完了しました。`)
       } catch (conversionError) {
         console.error("変換エラー:", conversionError);
         
@@ -345,19 +347,21 @@ export const DownloadDialog: React.FC<DownloadDialogProps> = ({
         link.remove();
         window.URL.revokeObjectURL(url);
         
-        toast({
-          title: "変換失敗",
-          description: `${format}形式への変換に失敗しました。テキスト形式でダウンロードしました。`,
-          variant: "destructive",
-        });
+        // toast({
+        //   title: "変換失敗",
+        //   description: `${format}形式への変換に失敗しました。テキスト形式でダウンロードしました。`,
+        //   variant: "destructive",
+        // });
+        console.log(`${format}形式への変換に失敗しました。テキスト形式でダウンロードしました。`)
       }
     } catch (error) {
       console.error("ダウンロードエラー:", error);
-      toast({
-        title: "エラー",
-        description: error instanceof Error ? error.message : "ファイルのダウンロード中にエラーが発生しました。",
-        variant: "destructive",
-      });
+      // toast({
+      //   title: "エラー",
+      //   description: error instanceof Error ? error.message : "ファイルのダウンロード中にエラーが発生しました。",
+      //   variant: "destructive",
+      // });
+      console.log("ファイルのダウンロード中にエラーが発生しました。")
     } finally {
       setIsDownloading(false);
       setShowConfirm(false);
@@ -399,11 +403,12 @@ export const DownloadDialog: React.FC<DownloadDialogProps> = ({
           disabled={disabled || (!hasReviewedFile && !hasOriginalFile)}
           onClick={() => {
             if (!hasReviewedFile && !hasOriginalFile) {
-              toast({
-                title: "エラー",
-                description: "ダウンロード可能なファイルがありません。先に職務経歴書をアップロードしてください。",
-                variant: "destructive",
-              });
+              // toast({
+              //   title: "エラー",
+              //   description: "ダウンロード可能なファイルがありません。先に職務経歴書をアップロードしてください。",
+              //   variant: "destructive",
+              // });
+              console.log("ダウンロード可能なファイルがありません。先に職務経歴書をアップロードしてください")
             } else {
               setIsDialogOpen(true);
             }

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect } from "react";
 import { FileText, Upload, Download } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
+// import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import ComparisonView from "./ComparisonView";
@@ -39,7 +39,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
     fileSize?: number;
   }>({});
 
-  const { toast } = useToast();
+  // const { toast } = useToast();
 
   // onFileProcessedコールバックが変更されたら、processedDataに基づいて呼び出す
   useEffect(() => {
@@ -149,28 +149,31 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
         setProgress(100);
         setProcessingStage("処理完了");
 
-        toast({
-          title: "ファイルの処理が完了しました",
-          description: "テキストの添削が完了しました。",
-        });
+        // toast({
+        //   title: "ファイルの処理が完了しました",
+        //   description: "テキストの添削が完了しました。",
+        // });
+        console.log("ファイルの処理が完了しました")
       } catch (error) {
         console.error("ファイル処理中にエラーが発生しました:", error);
-        toast({
-          title: "処理エラー",
-          description: error instanceof Error ? error.message : "ファイルの処理中に問題が発生しました。",
-          variant: "destructive",
-        });
+        // toast({
+        //   title: "処理エラー",
+        //   description: error instanceof Error ? error.message : "ファイルの処理中に問題が発生しました。",
+        //   variant: "destructive",
+        // });
+        console.log("ファイルの処理中に問題が発生しました。")
       } finally {
         // 進捗シミュレーションを停止
         stopSimulation();
         setIsProcessing(false);
       }
     } else {
-      toast({
-        title: "対応していないファイル形式",
-        description: "PDF、Word、またはテキスト形式のファイルをアップロードしてください。",
-        variant: "destructive",
-      });
+      // toast({
+      //   title: "対応していないファイル形式",
+      //   description: "PDF、Word、またはテキスト形式のファイルをアップロードしてください。",
+      //   variant: "destructive",
+      // });
+      console.log("PDF、Word、またはテキスト形式のファイルをアップロードしてください。")
     }
   };
 
