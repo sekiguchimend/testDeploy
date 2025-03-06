@@ -121,7 +121,7 @@ export default function AdminDashboard() {
   const handleDownload = (id: number) => {
     // toast({
     //   title: "ダウンロードを開始しました",
-    //   description: "職務経歴書のダウンロードを開始します。",
+    //   description: "職務経歴書のダウンロードを開始します。"
     // });
     console.log("職務経歴書のダウンロードを開始します。")
   };
