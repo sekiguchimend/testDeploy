@@ -5,7 +5,8 @@ import { FileText, Upload, Download } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { ComparisonView } from "./ComparisonView";
+import  ComparisonView  from "./ComparisonView";
+import { DownloadDialog } from "./DownloadDialog";
 
 export const FileUpload = () => {
   const [isDragging, setIsDragging] = useState(false);
@@ -18,7 +19,13 @@ export const FileUpload = () => {
     downloadUrl?: string;
     downloadFileName?: string;
   } | null>(null);
-  
+  const [fileInfo, setFileInfo] = useState<{
+    reviewedFilePath?: string;
+    originalWithDesignPath?: string;
+    fileName?: string;
+    fileSize?: number;
+  }>({});
+
   const { toast } = useToast();
 
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -65,7 +72,8 @@ export const FileUpload = () => {
     if (
       file.type === "application/pdf" ||
       file.type === "application/msword" ||
-      file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      file.name.endsWith('.txt') // テキストファイルもサポート
     ) {
       setIsProcessing(true);
       const formData = new FormData();
@@ -75,6 +83,7 @@ export const FileUpload = () => {
       const stopSimulation = simulateProgress();
 
       try {
+        // 通常のレビューAPI呼び出し
         const res = await fetch("/api/review", {
           method: "POST",
           body: formData,
@@ -90,11 +99,22 @@ export const FileUpload = () => {
           throw new Error(data.error);
         }
 
+        // 処理結果を設定
         setProcessedData({
           originalText: data.originalText,
           correctedText: data.correctedText,
           downloadUrl: data.downloadUrl,
           downloadFileName: data.downloadFileName
+        });
+
+        // ダウンロード用のファイル情報を設定
+        // ここでAPIレスポンスからプロパティを取得
+        // APIによって返されるプロパティ名が異なる可能性があるため、適宜調整
+        setFileInfo({
+          reviewedFilePath: data.reviewedFilePath || data.downloadFileName,
+          originalWithDesignPath: data.originalWithDesignPath,
+          fileName: file.name,
+          fileSize: file.size
         });
 
         // 進捗を100%に設定
@@ -120,7 +140,7 @@ export const FileUpload = () => {
     } else {
       toast({
         title: "対応していないファイル形式",
-        description: "PDFまたはWord形式のファイルをアップロードしてください。",
+        description: "PDF、Word、またはテキスト形式のファイルをアップロードしてください。",
         variant: "destructive",
       });
     }
@@ -139,6 +159,7 @@ export const FileUpload = () => {
 
   const handleReset = () => {
     setProcessedData(null);
+    setFileInfo({});
     setProgress(0);
     setProcessingStage("");
   };
@@ -159,7 +180,18 @@ export const FileUpload = () => {
           />
           
           <div className="flex justify-center space-x-4 mt-8">
-            {processedData.downloadUrl && (
+            {/* ダウンロードボタンとして、APIから返されたURLがある場合はDropdownDialogを表示 */}
+            {(processedData.downloadUrl || fileInfo.reviewedFilePath) && (
+              <DownloadDialog 
+                reviewedFilePath={fileInfo.reviewedFilePath || processedData.downloadFileName}
+                originalWithDesignPath={fileInfo.originalWithDesignPath}
+                fileName={fileInfo.fileName || processedData.downloadFileName}
+                fileSize={fileInfo.fileSize}
+              />
+            )}
+            
+            {/* ダウンロードダイアログが利用できない場合のフォールバック */}
+            {/* {processedData.downloadUrl && !fileInfo.reviewedFilePath && (
               <Button 
                 onClick={handleDownload}
                 className="flex items-center space-x-2"
@@ -167,7 +199,7 @@ export const FileUpload = () => {
                 <Download className="w-4 h-4" />
                 <span>添削済みファイルをダウンロード</span>
               </Button>
-            )}
+            )} */}
             
             <Button 
               variant="outline" 
@@ -229,7 +261,7 @@ export const FileUpload = () => {
                 <input
                   type="file"
                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  accept=".pdf,.doc,.docx,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
                   onChange={(e) => {
                     const selectedFile = e.target.files?.[0];
                     if (selectedFile) {

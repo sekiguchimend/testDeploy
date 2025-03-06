@@ -61,12 +61,17 @@ export async function POST(req: NextRequest) {
     fs.writeFileSync(tempFilePath, buffer);
 
     try {
-      // ファイルを処理（デザイン情報抽出フラグを渡す）
-      const processedFile = await processFile(tempFilePath, extractDesign);
+      // ファイルを処理
+      const processedFile = await processFile(tempFilePath, false); // extractDesign フラグは不要になった
 
-      // テキストの添削（デザイン情報があれば利用）
+      // テキストの添削とデザイン情報の取得（Geminiから一緒に返される）
       console.log("テキスト添削を開始します...");
-      const correctedText = await reviewTextWithGemini(processedFile.originalText, processedFile.designInfo);
+      const result = await reviewTextWithGemini(
+        processedFile.originalText, 
+        extractDesign
+      );
+      const correctedText = result.correctedText || result;
+      const designInfo = result.designInfo;
       console.log("テキスト添削が完了しました");
 
       // 添削されたテキストでファイルを更新
@@ -103,8 +108,8 @@ export async function POST(req: NextRequest) {
       };
       
       // デザイン情報を抽出した場合はレスポンスに追加
-      if (extractDesign && processedFile.designInfo) {
-        response.designInfo = processedFile.designInfo;
+      if (extractDesign && designInfo) {
+        response.designInfo = designInfo;
       }
       
       // PDF変換が成功した場合はダウンロードURLを追加
