@@ -46,7 +46,7 @@ interface ParagraphWithDiff {
   text: string;
   diffParts: DiffPart[];
   matchedWith?: number; // 対応する段落のインデックス
-  elementType: 'h1' | 'h2' | 'p' | 'li' | 'blockquote'; // 段落の種類
+  elementType: 'h1' | 'h2'| 'h3' | 'p' | 'li' | 'blockquote'; // 段落の種類
 }
 
 /**
