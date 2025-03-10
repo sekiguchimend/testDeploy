@@ -5,6 +5,7 @@ import * as os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import { processFile, reviewTextWithGemini, updateFileWithReviewedText, convertToPdfWithLibreOffice } from "@/lib/file-processor";
 import { saveResumeFile } from "@/lib/resumeService";
+import { processRestrictedKeywords } from "@/lib/keywordService";
 import supabase from "@/lib/supabase";
 
 // 一時ディレクトリのパス
@@ -21,7 +22,12 @@ const ALLOWED_TYPES = [
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.oasis.opendocument.text",
-  "text/plain" // テキストファイルも許可
+  "text/plain", // テキストファイルも許可
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "text/csv",
+  "image/jpeg",
+  "image/png"
 ];
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
@@ -55,7 +61,7 @@ export async function POST(req: NextRequest) {
 
       if (!ALLOWED_TYPES.includes(file.type)) {
         return NextResponse.json(
-          { error: "無効なファイル形式です。PDF、Word、ODT、テキストファイルのみ対応しています" },
+          { error: "無効なファイル形式です。PDF、Word、ODT、Excel、CSV、画像、テキストファイルに対応しています" },
           { status: 400 }
         );
       }
@@ -101,12 +107,58 @@ export async function POST(req: NextRequest) {
     }
 
     try {
+      // 禁止キーワードのチェックと処理
+      const keywordResult = await processRestrictedKeywords(originalText);
+      let processedText = originalText;
+      let warnings = [];
+      
+      if (!keywordResult.success) {
+        console.warn("キーワードチェックエラー:", keywordResult.error_message);
+        // エラーがあっても処理を継続
+      } else if (keywordResult.containsRestricted) {
+        // 禁止キーワードが見つかった場合
+        processedText = keywordResult.text; // [機密情報] などに置換済みのテキスト
+        
+        // 添削対象外または要確認のキーワードに関する警告を収集
+        for (const [keyword, action] of Object.entries(keywordResult.actions)) {
+          warnings.push({
+            keyword,
+            action,
+            message: action === '添削対象外' 
+              ? `「${keyword}」は添削対象外として検出されました。該当部分は [${keyword}] に置換されています。` 
+              : `「${keyword}」が検出されました。取り扱いにご注意ください。`
+          });
+        }
+        
+        console.log(`キーワードチェック: ${warnings.length}件の制限キーワードを検出しました`);
+      }
+
+      // カスタムプロンプトを準備（禁止キーワードが含まれていないか確認）
+      let sanitizedCustomPrompt = customPrompt;
+      
+      if (customPrompt) {
+        const promptKeywordResult = await processRestrictedKeywords(customPrompt);
+        if (promptKeywordResult.success && promptKeywordResult.containsRestricted) {
+          // カスタムプロンプトから禁止キーワードを削除
+          sanitizedCustomPrompt = promptKeywordResult.text;
+          
+          // 警告にプロンプト関連の情報を追加
+          warnings.push({
+            keyword: 'カスタムプロンプト',
+            action: '自動置換',
+            message: 'カスタムプロンプトに制限キーワードが含まれていたため、一部が置換されました。'
+          });
+          
+          console.log("カスタムプロンプトから制限キーワードを削除しました");
+        }
+      }
+
       // テキストの添削とデザイン情報の取得
       console.log("テキスト添削を開始します...");
       const result = await reviewTextWithGemini(
-        originalText, 
+        processedText, // 処理済みのテキストを使用
         extractDesign,
-        customPrompt // カスタムプロンプトを渡す
+        sanitizedCustomPrompt // 処理済みのカスタムプロンプトを渡す
       );
 
       // Geminiからの返り値をチェック
@@ -170,20 +222,21 @@ export async function POST(req: NextRequest) {
           designInfoAvailable: !!designInfo,
           hasPdf: !!downloadInfo.pdfFilePath,
           processedAt: new Date().toISOString(),
-          customPrompt: customPrompt || undefined,
+          customPrompt: sanitizedCustomPrompt || undefined,
           originalText, // 元のテキストもメタデータに保存
           correctedText, // 添削後のテキストもメタデータに保存
-          localFilePath: path.basename(reviewedFilePath) // ローカルファイルパスを保存
+          localFilePath: path.basename(reviewedFilePath), // ローカルファイルパスを保存
+          hasWarnings: warnings.length > 0,
+          warningsCount: warnings.length
         };
         
         // データベースに保存（ファイルパスはローカルのパスを使用）
         const saveResult = await saveResumeFile(
           downloadFileName,
           path.basename(reviewedFilePath), // ファイル名のみを保存
-          originalText,
-          correctedText,
-          userName,
-          metadata
+          userName,metadata
+          
+          
         );
         
         if (saveResult.success) {
@@ -206,6 +259,11 @@ export async function POST(req: NextRequest) {
         fileSize: fileSize,
         jsonResponse: jsonResponse
       };
+      
+      // 警告がある場合はレスポンスに追加
+      if (warnings.length > 0) {
+        response.warnings = warnings;
+      }
       
       // ファイルIDがある場合は追加
       if (fileId) {
@@ -280,6 +338,12 @@ export async function GET(req: NextRequest) {
       contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     } else if (path.extname(filePath).toLowerCase() === '.doc') {
       contentType = 'application/msword';
+    } else if (path.extname(filePath).toLowerCase() === '.xlsx') {
+      contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    } else if (path.extname(filePath).toLowerCase() === '.xls') {
+      contentType = 'application/vnd.ms-excel';
+    } else if (path.extname(filePath).toLowerCase() === '.csv') {
+      contentType = 'text/csv';
     }
     
     // レスポンスを作成

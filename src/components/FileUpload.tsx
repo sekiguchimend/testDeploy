@@ -1,7 +1,7 @@
 "use client";
-
+import React from 'react';
 import { useState, useCallback, useEffect } from "react";
-import { FileText, Upload, Download, MessageSquare, Repeat } from "lucide-react";
+import { FileText, Upload, Download, MessageSquare, Repeat, File, FileSpreadsheet, FileImage ,AlertTriangle} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,15 +12,25 @@ import {
   DialogContent, 
   DialogHeader, 
   DialogTitle, 
-  DialogFooter
+  DialogFooter,
+  DialogDescription
 } from "@/components/ui/dialog";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import ComparisonView from "./ComparisonView";
 import { DownloadDialog } from "./DownloadDialog";
 
+// 警告情報の型定義
+interface KeywordWarning {
+  keyword: string;
+  action: string;
+  message: string;
+}
+
 // DownloadDialogコンポーネントのプロパティ型を定義
+
 interface DownloadDialogProps {
-  downloadUrl?: string;
-  fileName?: string;
+  downloadUrl: string;
+  fileName: string;
   fileSize?: number;
   designInfo?: any;
   correctedText?: string;
@@ -34,7 +44,17 @@ interface FileUploadProps {
     designInfo?: any;
     downloadUrl: string;
     pdfDownloadUrl?: string;
+    warnings?: KeywordWarning[];
   }) => void;
+}
+
+// サポートされるファイル形式
+interface FileTypeConfig {
+  type: string;
+  extensions: string[];
+  mimeTypes: string[];
+  icon: React.ReactNode;
+  label: string;
 }
 
 export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
@@ -46,9 +66,12 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
   const [extractDesign, setExtractDesign] = useState(true);
   const [isPromptDialogOpen, setIsPromptDialogOpen] = useState(false);
   const [isRereviewDialogOpen, setIsRereviewDialogOpen] = useState(false);
-  const [isRereviewProcessing, setIsRereviewProcessing] = useState(false); // 再添削処理中のステータス
-  const [rereviewStage, setRereviewStage] = useState(""); // 再添削のステージ表示
-  const [rereviewProgress, setRereviewProgress] = useState(0); // 再添削の進捗状況
+  const [isRereviewProcessing, setIsRereviewProcessing] = useState(false);
+  const [rereviewStage, setRereviewStage] = useState("");
+  const [rereviewProgress, setRereviewProgress] = useState(0);
+  const [warnings, setWarnings] = useState<KeywordWarning[]>([]);
+  const [isWarningDialogOpen, setIsWarningDialogOpen] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [processedData, setProcessedData] = useState<{
     originalText: string;
     correctedText: string;
@@ -57,13 +80,54 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
     designInfo?: any;
     pdfDownloadUrl?: string;
     jsonResponse?: any;
+    warnings?: KeywordWarning[];
   } | null>(null);
   const [fileInfo, setFileInfo] = useState<{
     reviewedFilePath?: string;
     originalWithDesignPath?: string;
     fileName?: string;
     fileSize?: number;
+    fileType?: string;
   }>({});
+
+  // サポートされるファイルタイプの定義
+  const supportedFileTypes: FileTypeConfig[] = [
+    {
+      type: 'document',
+      extensions: ['.pdf', '.doc', '.docx', '.txt', '.rtf'],
+      mimeTypes: [
+        'application/pdf',
+        'application/msword',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'text/plain',
+        'application/rtf'
+      ],
+      icon: <FileText className="w-6 h-6" />,
+      label: '文書'
+    },
+    {
+      type: 'spreadsheet',
+      extensions: ['.xlsx', '.xls', '.csv'],
+      mimeTypes: [
+        'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'text/csv'
+      ],
+      icon: <FileSpreadsheet className="w-6 h-6" />,
+      label: '表計算'
+    },
+    {
+      type: 'image',
+      extensions: ['.jpg', '.jpeg', '.png'],
+      mimeTypes: ['image/jpeg', 'image/png'],
+      icon: <FileImage className="w-6 h-6" />,
+      label: '画像'
+    }
+  ];
+  
+  // 全サポートファイル拡張子の結合
+  const allSupportedExtensions = supportedFileTypes.flatMap(type => type.extensions).join(',');
+  const allSupportedMimeTypes = supportedFileTypes.flatMap(type => type.mimeTypes).join(',');
 
   // onFileProcessedコールバックが変更されたら、processedDataに基づいて呼び出す
   useEffect(() => {
@@ -73,7 +137,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
         correctedText: processedData.correctedText,
         designInfo: processedData.designInfo,
         downloadUrl: processedData.downloadUrl || '',
-        pdfDownloadUrl: processedData.pdfDownloadUrl
+        pdfDownloadUrl: processedData.pdfDownloadUrl,
+        warnings: processedData.warnings
       });
     }
   }, [onFileProcessed, processedData]);
@@ -95,7 +160,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
     const stages = [
       "ファイルをアップロード中...",
       "テキストを抽出中...",
-      "デザインデータを解析中...",
+      "キーワードをチェック中...",
       "AI添削を実行中...",
       "ドキュメントを再構成中..."
     ];
@@ -126,8 +191,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
     const stages = [
       "前回の添削結果を分析中...",
       "改善ポイントを特定中...",
+      "キーワードをチェック中...",
       "AI再添削を実行中...",
-      "ドキュメントを最適化中...",
       "最終仕上げ中..."
     ];
     
@@ -149,83 +214,120 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
     return () => clearInterval(interval);
   };
 
+  // ファイルタイプが対応しているかチェック
+  const isFileTypeSupported = (file: File): boolean => {
+    const extension = '.' + file.name.split('.').pop()?.toLowerCase();
+    
+    // MIMEタイプまたは拡張子でチェック
+    return supportedFileTypes.some(type => 
+      type.mimeTypes.includes(file.type) || type.extensions.includes(extension)
+    );
+  };
+
+  // ファイルタイプのアイコンを取得
+  const getFileTypeIcon = (file: File): React.ReactNode => {
+    const extension = '.' + file.name.split('.').pop()?.toLowerCase();
+    
+    const fileType = supportedFileTypes.find(type => 
+      type.mimeTypes.includes(file.type) || type.extensions.includes(extension)
+    );
+    
+    return fileType?.icon || <File className="w-6 h-6" />;
+  };
+
   const handleFile = async (file: File) => {
-    if (
-      file.type === "application/pdf" ||
-      file.type === "application/msword" ||
-      file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      file.name.endsWith('.txt') // テキストファイルもサポート
-    ) {
-      setIsProcessing(true);
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("extractDesign", extractDesign.toString());
+    // ファイルタイプの確認
+    if (!isFileTypeSupported(file)) {
+      setFileError("サポートされていないファイル形式です。対応形式をご確認ください。");
+      return;
+    }
+    
+    // エラーメッセージをクリア
+    setFileError(null);
+    setIsProcessing(true);
+    
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("extractDesign", extractDesign.toString());
+    
+    // カスタムプロンプトがある場合は追加
+    if (customPrompt) {
+      formData.append("customPrompt", customPrompt);
+    }
+
+    // 進捗シミュレーション開始
+    const stopSimulation = simulateProgress();
+
+    try {
+      // 通常のレビューAPI呼び出し
+      const res = await fetch("/api/review", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP エラー: ${res.status}`);
+      }
+
+      const data = await res.json();
       
-      // カスタムプロンプトがある場合は追加
-      if (customPrompt) {
-        formData.append("customPrompt", customPrompt);
+      if (data.error) {
+        throw new Error(data.error);
       }
 
-      // 進捗シミュレーション開始
-      const stopSimulation = simulateProgress();
-
-      try {
-        // 通常のレビューAPI呼び出し
-        const res = await fetch("/api/review", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!res.ok) {
-          throw new Error(`HTTP エラー: ${res.status}`);
-        }
-
-        const data = await res.json();
-        
-        if (data.error) {
-          throw new Error(data.error);
-        }
-
-        // 処理結果を設定
-        const processedDataResult = {
-          originalText: data.originalText,
-          correctedText: data.correctedText,
-          downloadUrl: data.downloadUrl,
-          downloadFileName: data.downloadFileName,
-          designInfo: data.designInfo,
-          pdfDownloadUrl: data.pdfDownloadUrl,
-          jsonResponse: data.jsonResponse
-        };
-
-        setProcessedData(processedDataResult);
-
-        // ダウンロード用のファイル情報を設定
-        setFileInfo({
-          reviewedFilePath: data.reviewedFilePath || data.downloadFileName,
-          originalWithDesignPath: data.originalWithDesignPath,
-          fileName: file.name,
-          fileSize: file.size
-        });
-
-        // 進捗を100%に設定
-        setProgress(100);
-        setProcessingStage("処理完了");
-        
-        // カスタムプロンプトをリセット
-        setCustomPrompt("");
-
-        console.log("ファイルの処理が完了しました");
-      } catch (error) {
-        console.error("ファイル処理中にエラーが発生しました:", error);
-        console.log("ファイルの処理中に問題が発生しました。");
-      } finally {
-        // 進捗シミュレーションを停止
-        stopSimulation();
-        setIsProcessing(false);
-        setIsPromptDialogOpen(false);
+      // 警告があれば保存して表示
+      if (data.warnings && Array.isArray(data.warnings) && data.warnings.length > 0) {
+        setWarnings(data.warnings);
+        setIsWarningDialogOpen(true);
+      } else {
+        setWarnings([]);
       }
-    } else {
-      console.log("PDF、Word、またはテキスト形式のファイルをアップロードしてください。");
+
+      // 処理結果を設定
+      const processedDataResult = {
+        originalText: data.originalText,
+        correctedText: data.correctedText,
+        downloadUrl: data.downloadUrl,
+        downloadFileName: data.downloadFileName,
+        designInfo: data.designInfo,
+        pdfDownloadUrl: data.pdfDownloadUrl,
+        jsonResponse: data.jsonResponse,
+        warnings: data.warnings
+      };
+
+      setProcessedData(processedDataResult);
+
+      // ファイルタイプの取得
+      const extension = '.' + file.name.split('.').pop()?.toLowerCase();
+      const fileType = supportedFileTypes.find(type => 
+        type.mimeTypes.includes(file.type) || type.extensions.includes(extension)
+      )?.type || 'unknown';
+
+      // ダウンロード用のファイル情報を設定
+      setFileInfo({
+        reviewedFilePath: data.reviewedFilePath || data.downloadFileName,
+        originalWithDesignPath: data.originalWithDesignPath,
+        fileName: file.name,
+        fileSize: file.size,
+        fileType
+      });
+
+      // 進捗を100%に設定
+      setProgress(100);
+      setProcessingStage("処理完了");
+      
+      // カスタムプロンプトをリセット
+      setCustomPrompt("");
+
+      console.log("ファイルの処理が完了しました");
+    } catch (error: any) {
+      console.error("ファイル処理中にエラーが発生しました:", error);
+      setFileError(error.message || "ファイルの処理中に問題が発生しました。");
+    } finally {
+      // 進捗シミュレーションを停止
+      stopSimulation();
+      setIsProcessing(false);
+      setIsPromptDialogOpen(false);
     }
   };
 
@@ -267,6 +369,14 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
         throw new Error(data.error);
       }
       
+      // 警告があれば保存して表示
+      if (data.warnings && Array.isArray(data.warnings) && data.warnings.length > 0) {
+        setWarnings(data.warnings);
+        setIsWarningDialogOpen(true);
+      } else {
+        setWarnings([]);
+      }
+      
       // 処理結果を設定
       const processedDataResult = {
         originalText: processedData.correctedText,  // 前回の添削結果が今回の元テキスト
@@ -275,7 +385,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
         downloadFileName: data.downloadFileName,
         designInfo: data.designInfo,
         pdfDownloadUrl: data.pdfDownloadUrl,
-        jsonResponse: data.jsonResponse
+        jsonResponse: data.jsonResponse,
+        warnings: data.warnings
       };
       
       setProcessedData(processedDataResult);
@@ -285,7 +396,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
         reviewedFilePath: data.reviewedFilePath || data.downloadFileName,
         originalWithDesignPath: data.originalWithDesignPath,
         fileName: fileInfo.fileName || data.downloadFileName || "reviewed_text.txt",
-        fileSize: data.fileSize || Buffer.byteLength(data.correctedText, 'utf8')
+        fileSize: data.fileSize || Buffer.byteLength(data.correctedText, 'utf8'),
+        fileType: fileInfo.fileType
       });
       
       // 進捗を100%に設定
@@ -296,9 +408,9 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
       setCustomPrompt("");
       
       console.log("再添削が完了しました");
-    } catch (error) {
+    } catch (error: any) {
       console.error("再添削中にエラーが発生しました:", error);
-      console.log("再添削中に問題が発生しました。");
+      setFileError(error.message || "再添削中に問題が発生しました。");
     } finally {
       // 進捗シミュレーションを停止
       stopSimulation();
@@ -310,6 +422,9 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
+    
+    // エラーメッセージをクリア
+    setFileError(null);
 
     const files = Array.from(e.dataTransfer.files);
     if (files.length > 0) {
@@ -325,6 +440,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
     setRereviewProgress(0);
     setRereviewStage("");
     setCustomPrompt("");
+    setWarnings([]);
+    setFileError(null);
   };
 
   const openPromptDialog = () => {
@@ -335,8 +452,65 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
     setIsRereviewDialogOpen(true);
   };
 
+  // サポートされるファイル形式の表示文字列を生成
+  const getSupportedFileTypesDisplay = () => {
+    return supportedFileTypes.map(type => {
+      const extensions = type.extensions.join(', ');
+      return `${type.label}(${extensions})`;
+    }).join('、');
+  };
+
+  // 警告ダイアログ
+  const WarningDialog = () => (
+    <Dialog open={isWarningDialogOpen} onOpenChange={setIsWarningDialogOpen}>
+      <DialogContent className="sm:max-w-[600px]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center text-amber-600">
+            <AlertTriangle className="w-5 h-5 mr-2" />
+            添削処理の警告
+          </DialogTitle>
+          <DialogDescription>
+            添削処理中に以下の注意点が検出されました。
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          {warnings.map((warning, index) => (
+            <Alert key={index} className={
+              warning.action === '添削対象外' 
+                ? 'border-red-300 bg-red-50' 
+                : 'border-amber-300 bg-amber-50'
+            }>
+              <AlertTitle className={
+                warning.action === '添削対象外' 
+                  ? 'text-red-800' 
+                  : 'text-amber-800'
+              }>
+                {warning.keyword}: {warning.action}
+              </AlertTitle>
+              <AlertDescription className="text-gray-700">
+                {warning.message}
+              </AlertDescription>
+            </Alert>
+          ))}
+        </div>
+        <DialogFooter>
+          <Button 
+            type="button" 
+            variant="default"
+            onClick={() => setIsWarningDialogOpen(false)}
+          >
+            了解しました
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
   return (
     <div className="w-full max-w-4xl mx-auto mt-8 animate-fadeIn">
+      {/* 警告ダイアログ */}
+      {warnings.length > 0 && <WarningDialog />}
+      
       {/* プロンプト設定ダイアログ */}
       <Dialog open={isPromptDialogOpen} onOpenChange={setIsPromptDialogOpen}>
         <DialogContent className="sm:max-w-[600px]">
@@ -514,6 +688,16 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
             </Button>
           </div>
           
+          {/* ファイルエラー表示 */}
+          {fileError && (
+            <Alert className="mb-4 border-red-300 bg-red-50">
+              <AlertTitle className="text-red-800">エラー</AlertTitle>
+              <AlertDescription className="text-gray-700">
+                {fileError}
+              </AlertDescription>
+            </Alert>
+          )}
+          
           {/* ファイルドロップエリア */}
           <div
             className="w-full"
@@ -552,19 +736,27 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
                   </div>
                   <div className="text-center space-y-2">
                     <h3 className="text-lg font-semibold">
-                      {isDragging ? "ここにファイルをドロップ" : "履歴書をアップロード"}
+                      {isDragging ? "ここにファイルをドロップ" : "ファイルをアップロード"}
                     </h3>
                     <p className="text-sm text-gray-500">
                       ファイルをドラッグ＆ドロップするか、クリックして選択してください
                     </p>
-                    <p className="text-xs text-gray-400">
-                      対応フォーマット: PDF、Word (.doc, .docx)、テキスト (.txt)
+                    <div className="flex flex-wrap justify-center gap-2 mt-4">
+                      {supportedFileTypes.map((type, index) => (
+                        <div key={index} className="flex items-center bg-gray-50 rounded-full px-3 py-1 text-xs text-gray-600">
+                          {type.icon}
+                          <span className="ml-1">{type.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-2">
+                      対応形式: {getSupportedFileTypesDisplay()}
                     </p>
                   </div>
                   <input
                     type="file"
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                    accept=".pdf,.doc,.docx,.txt,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                    accept={allSupportedExtensions + ',' + allSupportedMimeTypes}
                     onChange={(e) => {
                       const selectedFile = e.target.files?.[0];
                       if (selectedFile) {
@@ -583,4 +775,4 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
   );
 };
 
-export default FileUpload;
+export default FileUpload

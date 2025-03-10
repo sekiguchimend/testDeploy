@@ -1,5 +1,5 @@
 "use client"
-import { useState, useRef } from "react";
+import React, { useState, useRef } from "react";
 import { Download, FileText, File, FileDown } from "lucide-react";
 import {
   Dialog,
@@ -102,13 +102,17 @@ interface DownloadDialogProps {
   fileName?: string;                // ファイル名
   fileSize?: number;                // ファイルサイズ
   disabled?: boolean;               // 無効化フラグ
+  downloadUrl?: string;             // ダウンロードURL
+  correctedText?: string;           // 添削後のテキスト
 }
 
 export const DownloadDialog: React.FC<DownloadDialogProps> = ({
   designInfo,
   fileName = "添削済みファイル",
   fileSize,
-  disabled = false
+  disabled = false,
+  downloadUrl,
+  correctedText
 }) => {
   const [format, setFormat] = useState<'pdf' | 'docx' | 'txt' | 'html' | 'markdown'>("txt");
   const [fileType, setFileType] = useState<"corrected" | "original">("corrected");

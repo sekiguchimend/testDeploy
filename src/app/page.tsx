@@ -3,7 +3,9 @@
 import { useState } from "react";
 import { FileUpload } from "@/components/FileUpload";
 import ComparisonView from "@/components/ComparisonView";
+import {Settings } from "lucide-react";
 // import { DownloadDialog } from "@/components/DownloadDialog";
+import Link from "next/link"; // Next.js の Link を正しく import
 
 // FileProcessedDataの型を定義
 interface FileProcessedData {
@@ -38,13 +40,20 @@ const Index = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8">
-          <h1 className="text-lg font-semibold text-gray-900">
-            履歴書レビュープラットフォーム
-          </h1>
-        </div>
-      </header>
+     <header className="bg-white shadow-sm">
+  <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+    {/* 左側：タイトル */}
+    <h1 className="text-lg font-semibold text-gray-900">
+      履歴書レビュープラットフォーム
+    </h1>
+
+    {/* 右側：設定アイコン */}
+    <Link href="/admin">
+      <Settings className="h-6 w-6 text-gray-600 hover:text-gray-800 cursor-pointer" />
+    </Link>
+  </div>
+</header>
+
 
       <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
         <div className="px-4 py-6 sm:px-0">

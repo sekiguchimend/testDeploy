@@ -10,6 +10,7 @@ export interface ResumeFile {
   metadata?: any;
   original_text?: string;
   corrected_text?: string;
+  pdf_url?:string
 }
 
 export interface Keyword {
@@ -40,17 +41,16 @@ export interface MonthlyStats {
 export async function saveResumeFile(
   fileName: string,
   filePath: string,
-  originalText: string,
-  correctedText: string,
   userName: string = 'ゲストユーザー',
   metadata: any = {}
 ): Promise<UploadResult> {
   try {
-    // メタデータにテキスト以外の情報を設定
+    // メタデータから不要な項目を削除
+    const { correctedText, originalText, ...cleanedMetadata } = metadata;
+
+    // メタデータを拡張
     const enhancedMetadata = {
-      ...metadata,
-      originalTextLength: originalText.length,
-      correctedTextLength: correctedText.length,
+      ...cleanedMetadata,
       originalFileName: fileName,
       processedAt: new Date().toISOString(),
       timestamp: new Date().toISOString()
@@ -72,8 +72,7 @@ export async function saveResumeFile(
           status: '添削済み',
           file_path: filePath,
           metadata: enhancedMetadata,
-          original_text: originalText,   // テキスト列に直接保存
-          corrected_text: correctedText  // テキスト列に直接保存
+          pdf_url: metadata.pdfUrl
         }
       ])
       .select();
@@ -88,20 +87,22 @@ export async function saveResumeFile(
       
       // エラー時もアプリケーションを継続
       return { 
-        success: true, // エラーでも成功を返す
+        success: true, 
         error,
         error_details: {
           code: error.code,
           message: error.message
         },
-        file_path: filePath
+        file_path: filePath,
+        
       };
     }
     
     return { 
       success: true, 
       file_id: data?.[0]?.id,
-      file_path: filePath
+      file_path: filePath,
+      
     };
   } catch (error: any) {
     console.error('ファイル情報の保存エラー:', error);
@@ -114,7 +115,8 @@ export async function saveResumeFile(
         message: error.message || 'Unknown error',
         time: new Date().toISOString()
       },
-      file_path: filePath
+      file_path: filePath,
+     
     };
   }
 }

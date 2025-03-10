@@ -34,28 +34,22 @@ import {
   Cell,
   Legend,
 } from "recharts";
-import { Settings, Check, X, Edit2, FileText, Download, RefreshCw, Calendar } from "lucide-react";
-import { getAllResumeFiles, getMonthlyStats, getStatusStats, getFileDownloadURL } from "@/lib/resumeService";
+import Link from "next/link";
+import {ArrowLeft, Check, X, Edit2, FileText, Download, RefreshCw, Calendar, AlertTriangle, Link as lin} from "lucide-react";
+import { getAllResumeFiles, getMonthlyStats, getStatusStats } from "@/lib/resumeService";
+import { getAllKeywords, addKeyword, updateKeyword, deleteKeyword } from "@/lib/keywordService";
 import type { ResumeFile, MonthlyStats } from "@/lib/resumeService";
+import type { Keyword } from "@/lib/keywordService";
 import { toast } from "sonner";
-
-interface Keyword {
-  id: number;
-  keyword: string;
-  action: string;
-  isEditing?: boolean;
-}
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 // 円グラフのカラー
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
 
 export default function AdminDashboard() {
-  const [keywords, setKeywords] = useState<Keyword[]>([
-    { id: 1, keyword: "機密情報", action: "添削対象外" },
-    { id: 2, keyword: "個人情報", action: "添削対象外" },
-    { id: 3, keyword: "社内", action: "要確認" },
-  ]);
+  const [keywords, setKeywords] = useState<Keyword[]>([]);
   const [newKeyword, setNewKeyword] = useState("");
+  const [newAction, setNewAction] = useState<string>("要確認");
   const [editingKeyword, setEditingKeyword] = useState<{
     id: number | null;
     keyword: string;
@@ -65,6 +59,7 @@ export default function AdminDashboard() {
   // レジュメファイル管理
   const [resumes, setResumes] = useState<ResumeFile[]>([]);
   const [loading, setLoading] = useState(true); // 初期ロード時はtrueに変更
+  const [keywordsLoading, setKeywordsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
   // 統計データ
@@ -73,6 +68,44 @@ export default function AdminDashboard() {
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [statsLoading, setStatsLoading] = useState(true); // 初期ロード時はtrueに変更
   const [totalUploads, setTotalUploads] = useState(0); // 総アップロード数を追跡
+
+  // キーワード一覧をSupabaseから取得
+  const fetchKeywords = async () => {
+    if (keywordsLoading && !keywords.length) {
+      console.log('キーワード一覧取得を開始...');
+    } else {
+      setKeywordsLoading(true);
+    }
+    
+    try {
+      console.log('キーワード一覧を取得中...');
+      const result = await getAllKeywords();
+      
+      console.log('キーワード一覧取得結果:', {
+        成功: result.success,
+        データ数: result.data?.length || 0,
+        エラー: result.error_message || 'なし'
+      });
+      
+      if (result.data && Array.isArray(result.data)) {
+        setKeywords(result.data);
+      } else {
+        console.warn('レスポンスには有効なキーワード配列がありません:', result);
+        setKeywords([]);
+      }
+      
+      if (!result.success) {
+        console.warn('キーワード一覧取得に問題がありました:', result.error_message);
+        toast.warning("キーワードデータが正しく取得できていない可能性があります");
+      }
+    } catch (err: any) {
+      const errorMessage = err.message || 'キーワード一覧の取得に失敗しました';
+      console.error('キーワードデータ取得エラー:', errorMessage);
+      toast.error(errorMessage);
+    } finally {
+      setKeywordsLoading(false);
+    }
+  };
 
   // 添削済みファイルをSupabaseから取得
   const fetchResumeFiles = async () => {
@@ -135,7 +168,7 @@ export default function AdminDashboard() {
       console.log('月間統計取得結果:', {
         成功: monthlyResult.success,
         データ数: monthlyResult.data?.length || 0,
-        エラー: monthlyResult.error_message || 'なし'
+       
       });
       
       if (monthlyResult.data && Array.isArray(monthlyResult.data)) {
@@ -198,6 +231,7 @@ export default function AdminDashboard() {
     try {
       await fetchResumeFiles();
       await fetchStats(selectedYear);
+      await fetchKeywords();
       toast.success("データを更新しました");
     } catch (error) {
       console.error('データ更新中にエラーが発生:', error);
@@ -250,16 +284,25 @@ export default function AdminDashboard() {
   }));
   
   // キーワード関連の処理
-  const handleAddKeyword = () => {
+  const handleAddKeyword = async () => {
     if (newKeyword.trim()) {
-      const newId = Math.max(...keywords.map((k) => k.id), 0) + 1;
-      setKeywords([
-        ...keywords,
-        { id: newId, keyword: newKeyword, action: "要確認" },
-      ]);
-      setNewKeyword("");
-      
-      toast.success(`キーワード「${newKeyword}」を追加しました`);
+      setKeywordsLoading(true);
+      try {
+        const result = await addKeyword(newKeyword, newAction);
+        
+        if (result.success && result.data) {
+          setKeywords([...keywords, result.data]);
+          setNewKeyword("");
+          toast.success(`キーワード「${newKeyword}」を追加しました`);
+        } else {
+          toast.error(`キーワード追加エラー: ${result.error_message}`);
+        }
+      } catch (error: any) {
+        console.error('キーワード追加に失敗:', error);
+        toast.error(error.message || 'キーワードの追加に失敗しました');
+      } finally {
+        setKeywordsLoading(false);
+      }
     }
   };
 
@@ -271,32 +314,56 @@ export default function AdminDashboard() {
     });
   };
 
-  const saveEdit = (id: number) => {
-    setKeywords(
-      keywords.map((k) =>
-        k.id === id
-          ? {
-              ...k,
-              keyword: editingKeyword.keyword,
-              action: editingKeyword.action,
-            }
-          : k
-      )
-    );
-    setEditingKeyword({ id: null, keyword: "", action: "" });
-    
-    toast.success("キーワードの設定を更新しました");
+  const saveEdit = async (id: number) => {
+    setKeywordsLoading(true);
+    try {
+      const result = await updateKeyword(
+        id, 
+        editingKeyword.keyword, 
+        editingKeyword.action
+      );
+      
+      if (result.success && result.data) {
+        setKeywords(
+          keywords.map((k) => (k.id === id ? result.data : k))
+        );
+        setEditingKeyword({ id: null, keyword: "", action: "" });
+        toast.success("キーワードの設定を更新しました");
+      } else {
+        toast.error(`キーワード更新エラー: ${result.error_message}`);
+      }
+    } catch (error: any) {
+      console.error('キーワード更新に失敗:', error);
+      toast.error(error.message || 'キーワードの更新に失敗しました');
+    } finally {
+      setKeywordsLoading(false);
+    }
   };
 
   const cancelEdit = () => {
     setEditingKeyword({ id: null, keyword: "", action: "" });
   };
 
-  const deleteKeyword = (id: number) => {
+  const deleteKeywordItem = async (id: number) => {
     const keywordToDelete = keywords.find(k => k.id === id);
-    setKeywords(keywords.filter((k) => k.id !== id));
+    if (!keywordToDelete) return;
     
-    toast.success(`キーワード「${keywordToDelete?.keyword || ''}」を削除しました`);
+    setKeywordsLoading(true);
+    try {
+      const result = await deleteKeyword(id);
+      
+      if (result.success) {
+        setKeywords(keywords.filter((k) => k.id !== id));
+        toast.success(`キーワード「${keywordToDelete.keyword}」を削除しました`);
+      } else {
+        toast.error(`キーワード削除エラー: ${result.error_message}`);
+      }
+    } catch (error: any) {
+      console.error('キーワード削除に失敗:', error);
+      toast.error(error.message || 'キーワードの削除に失敗しました');
+    } finally {
+      setKeywordsLoading(false);
+    }
   };
 
   // 日付フォーマット変換
@@ -324,9 +391,13 @@ export default function AdminDashboard() {
   return (
     <div className="container mx-auto p-6 space-y-8 animate-fadeIn bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen">
       <div className="flex justify-between items-center mb-8">
+      <Link href="./">
+        <ArrowLeft />
+        </Link>
         <h1 className="text-3xl font-bold tracking-tight text-gray-900">
           管理ダッシュボード
         </h1>
+        
         <Button
           variant="outline"
           className="hover:bg-gray-100 transition-colors"
@@ -372,10 +443,10 @@ export default function AdminDashboard() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="font-semibold">タイトル</TableHead>
-                    <TableHead className="font-semibold">ステータス</TableHead>
-                    <TableHead className="font-semibold">アップロード日時</TableHead>
-                    <TableHead className="font-semibold">ユーザー</TableHead>
+                    <TableHead className="font-semibold w-2/5">タイトル</TableHead>
+                    <TableHead className="font-semibold w-1/5">ステータス</TableHead>
+                    <TableHead className="font-semibold w-1/5">アップロード日時</TableHead>
+                    <TableHead className="font-semibold w-1/5">ユーザー</TableHead>
                     <TableHead className="text-right font-semibold">操作</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -398,9 +469,11 @@ export default function AdminDashboard() {
                   ) : (
                     resumes.map((resume) => (
                       <TableRow key={resume.id} className="hover:bg-gray-50/50">
-                        <TableCell className="font-medium flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-blue-500" />
-                          {resume.title || '名称なし'}
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            <FileText className="h-4 w-4 flex-shrink-0 text-blue-500" />
+                            <span className="line-clamp-2 break-words">{resume.title || '名称なし'}</span>
+                          </div>
                         </TableCell>
                         <TableCell>
                           <span className={`px-2 py-1 rounded-full text-sm ${
@@ -412,7 +485,7 @@ export default function AdminDashboard() {
                           </span>
                         </TableCell>
                         <TableCell>{formatDate(resume.uploaded_at)}</TableCell>
-                        <TableCell>{resume.user_name || 'ゲストユーザー'}</TableCell>
+                        <TableCell className="truncate max-w-[150px]">{resume.user_name || 'ゲストユーザー'}</TableCell>
                         <TableCell className="text-right">
                           <Button
                             variant="ghost"
@@ -439,111 +512,187 @@ export default function AdminDashboard() {
               <h2 className="text-xl font-semibold text-gray-900">
                 キーワード設定
               </h2>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={fetchKeywords}
+                className="text-gray-600 hover:text-gray-900"
+                disabled={keywordsLoading}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${keywordsLoading ? 'animate-spin' : ''}`} />
+                更新する
+              </Button>
             </div>
+            
+            <Alert className="mb-6 bg-amber-50 border-amber-200">
+              <AlertTriangle className="h-5 w-5 text-amber-600" />
+              <AlertDescription className="ml-2">
+                ここで設定したキーワードは添削プロセス中に検出され、「添削対象外」に設定したキーワードはAIプロンプトに含まれなくなります。
+              </AlertDescription>
+            </Alert>
+            
             <div className="space-y-6">
-              <div className="flex gap-4">
-                <Input
-                  placeholder="キーワードを入力"
-                  className="max-w-sm border-gray-200 focus:border-blue-500 focus:ring-blue-500"
-                  value={newKeyword}
-                  onChange={(e) => setNewKeyword(e.target.value)}
-                />
+              <div className="flex gap-4 items-end">
+                <div className="space-y-2 flex-1">
+                  <label htmlFor="newKeyword" className="text-sm font-medium">
+                    キーワード
+                  </label>
+                  <Input
+                    id="newKeyword"
+                    placeholder="キーワードを入力"
+                    className="border-gray-200 focus:border-blue-500 focus:ring-blue-500"
+                    value={newKeyword}
+                    onChange={(e) => setNewKeyword(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label htmlFor="newAction" className="text-sm font-medium">
+                    アクション
+                  </label>
+                  <Select 
+                    value={newAction} 
+                    onValueChange={setNewAction}
+                  >
+                    <SelectTrigger id="newAction" className="w-[150px]">
+                      <SelectValue placeholder="アクションを選択" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="添削対象外">添削対象外</SelectItem>
+                      <SelectItem value="要確認">要確認</SelectItem>
+                      <SelectItem value="警告表示">警告表示</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 <Button
                   onClick={handleAddKeyword}
                   className="bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                  disabled={keywordsLoading}
                 >
                   追加
                 </Button>
               </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="font-semibold">キーワード</TableHead>
-                    <TableHead className="font-semibold">アクション</TableHead>
-                    <TableHead className="text-right font-semibold">
-                      操作
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {keywords.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell className="font-medium">
-                        {editingKeyword.id === item.id ? (
-                          <Input
-                            value={editingKeyword.keyword}
-                            onChange={(e) =>
-                              setEditingKeyword({
-                                ...editingKeyword,
-                                keyword: e.target.value,
-                              })
-                            }
-                            className="max-w-[200px]"
-                          />
-                        ) : (
-                          item.keyword
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {editingKeyword.id === item.id ? (
-                          <Input
-                            value={editingKeyword.action}
-                            onChange={(e) =>
-                              setEditingKeyword({
-                                ...editingKeyword,
-                                action: e.target.value,
-                              })
-                            }
-                            className="max-w-[200px]"
-                          />
-                        ) : (
-                          item.action
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {editingKeyword.id === item.id ? (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => saveEdit(item.id)}
-                              className="mr-2"
-                            >
-                              <Check className="h-4 w-4 text-green-500" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={cancelEdit}
-                            >
-                              <X className="h-4 w-4 text-red-500" />
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => startEditing(item)}
-                              className="mr-2"
-                            >
-                              <Edit2 className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => deleteKeyword(item.id)}
-                              className="text-red-500 hover:bg-red-50 hover:text-red-600"
-                            >
-                              削除
-                            </Button>
-                          </>
-                        )}
-                      </TableCell>
+
+              <div className="relative">
+                {keywordsLoading && (
+                  <div className="absolute inset-0 bg-white/70 z-10 flex items-center justify-center">
+                    <RefreshCw className="h-10 w-10 animate-spin text-blue-500" />
+                  </div>
+                )}
+                
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="font-semibold w-2/5">キーワード</TableHead>
+                      <TableHead className="font-semibold w-2/5">アクション</TableHead>
+                      <TableHead className="text-right font-semibold w-1/5">
+                        操作
+                      </TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {keywords.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={3} className="text-center py-8 text-gray-500">
+                          登録されたキーワードがありません
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      keywords.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell className="font-medium">
+                            {editingKeyword.id === item.id ? (
+                              <Input
+                                value={editingKeyword.keyword}
+                                onChange={(e) =>
+                                  setEditingKeyword({
+                                    ...editingKeyword,
+                                    keyword: e.target.value,
+                                  })
+                                }
+                                className="max-w-[200px]"
+                              />
+                            ) : (
+                              item.keyword
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {editingKeyword.id === item.id ? (
+                              <Select
+                                value={editingKeyword.action}
+                                onValueChange={(value) =>
+                                  setEditingKeyword({
+                                    ...editingKeyword,
+                                    action: value,
+                                  })
+                                }
+                              >
+                                <SelectTrigger className="w-[150px]">
+                                  <SelectValue placeholder="アクションを選択" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="添削対象外">添削対象外</SelectItem>
+                                  <SelectItem value="要確認">要確認</SelectItem>
+                                  <SelectItem value="警告表示">警告表示</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            ) : (
+                              <span className={`px-2 py-1 rounded-full text-sm ${
+                                item.action === "添削対象外" 
+                                  ? "bg-red-100 text-red-800"
+                                  : item.action === "要確認"
+                                  ? "bg-yellow-100 text-yellow-800"
+                                  : "bg-blue-100 text-blue-800"
+                              }`}>
+                                {item.action}
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            {editingKeyword.id === item.id ? (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => saveEdit(item.id)}
+                                  className="mr-2"
+                                >
+                                  <Check className="h-4 w-4 text-green-500" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={cancelEdit}
+                                >
+                                  <X className="h-4 w-4 text-red-500" />
+                                </Button>
+                              </>
+                            ) : (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => startEditing(item)}
+                                  className="mr-2"
+                                >
+                                  <Edit2 className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => deleteKeywordItem(item.id)}
+                                  className="text-red-500 hover:bg-red-50 hover:text-red-600"
+                                >
+                                  削除
+                                </Button>
+                              </>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           </Card>
         </TabsContent>
@@ -739,8 +888,9 @@ export default function AdminDashboard() {
                 )}
               </div>
             </div>
-            </Card>
-           </TabsContent>
-          </Tabs>
-         </div>
-         )}
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
