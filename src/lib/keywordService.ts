@@ -109,7 +109,7 @@ export async function updateKeyword(id: number, keyword: string, action: string)
       return { 
         success: false, 
         data: null, 
-        error_message: 'キーワードが空です' 
+        error_message: 'キーワードが空です.' 
       };
     }
 
