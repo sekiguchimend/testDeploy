@@ -85,7 +85,6 @@ interface ProcessedFile {
   fileType: string;
   designInfo?: DesignInfo;
 }
-
 /**
  * Gemini APIのレスポンスをパースする関数
  * マークダウンのコードブロックも処理可能
@@ -231,12 +230,29 @@ export async function readWordFile(filePath: string): Promise<string> {
 }
 
 /**
+ * CSSルールからCSSスタイルシートテキストを生成する
+ */
+export function generateCssFromRules(cssRules: Array<{selector: string; properties: {[key: string]: string}}>): string {
+  if (!cssRules || !Array.isArray(cssRules) || cssRules.length === 0) {
+    return '';
+  }
+  
+  return cssRules.map(rule => {
+    const propertiesText = Object.entries(rule.properties)
+      .map(([key, value]) => `  ${key}: ${value};`)
+      .join('\n');
+      
+    return `${rule.selector} {\n${propertiesText}\n}`;
+  }).join('\n\n');
+}
+/**
  * Gemini APIを使用してテキストの添削とデザイン情報の抽出を行う
  */
 export async function processWithGemini(
   text: string,
   fileType: string,
-  extractDesign: boolean = true
+  extractDesign: boolean = true,
+  customPrompt: string = ""
 ): Promise<ProcessResult> {
   // テキストの長さをチェック
   if (text.length > MAX_TEXT_LENGTH) {
@@ -296,6 +312,7 @@ export async function processWithGemini(
         - 曖昧な表現は具体的に修正する
         - 誤字脱字を修正する
         - 元の文章と同じか少し多いくらいの文章量にする
+        ${customPrompt ? `\n【追加の指示】\n${customPrompt}` : ''}
 
         【出力形式】
         下のようにJSONオブジェクトで出力してくださいcssのスタイルはここにあるやつ以外にも模写するために必要なcssを入れてください
@@ -366,6 +383,7 @@ export async function processWithGemini(
         - 曖昧な表現は具体的に修正してください
         - 誤字脱字を修正してください
         - 元の文章と同じか少し多いくらいの文章量にしてください
+        ${customPrompt ? `\n【追加の指示】\n${customPrompt}` : ''}
 
         【出力形式】
         以下の形式のJSONオブジェクトで出力してください:
@@ -445,7 +463,6 @@ export async function processWithGemini(
   const errorMsg = lastError instanceof Error ? lastError.message : String(lastError);
   throw new Error(`処理に失敗しました: ${errorMsg}`);
 }
-
 /**
  * ファイルからテキストを抽出する
  */
@@ -484,23 +501,6 @@ export async function extractTextFromFile(filePath: string): Promise<{
       ? error
       : new Error("テキスト抽出中に不明なエラーが発生しました");
   }
-}
-
-/**
- * CSSルールからCSSスタイルシートテキストを生成する
- */
-export function generateCssFromRules(cssRules: Array<{selector: string; properties: {[key: string]: string}}>): string {
-  if (!cssRules || !Array.isArray(cssRules) || cssRules.length === 0) {
-    return '';
-  }
-  
-  return cssRules.map(rule => {
-    const propertiesText = Object.entries(rule.properties)
-      .map(([key, value]) => `  ${key}: ${value};`)
-      .join('\n');
-      
-    return `${rule.selector} {\n${propertiesText}\n}`;
-  }).join('\n\n');
 }
 
 /**
@@ -611,11 +611,14 @@ export async function convertToPdfWithLibreOffice(filePath: string): Promise<str
     throw error;
   }
 }
-
 /**
  * メイン処理関数 - API呼び出しを1回に統合
  */
-export async function processAndReviewFile(filePath: string, extractDesign: boolean = true): Promise<{
+export async function processAndReviewFile(
+  filePath: string, 
+  extractDesign: boolean = true,
+  customPrompt: string = ""
+): Promise<{
   originalText: string;
   reviewedText: string;
   reviewedFilePath: string;
@@ -631,7 +634,7 @@ export async function processAndReviewFile(filePath: string, extractDesign: bool
     const { text, fileType } = await extractTextFromFile(filePath);
     
     // Gemini APIでテキストの添削とデザイン情報の抽出を1回で行う
-    const result = await processWithGemini(text, fileType, extractDesign);
+    const result = await processWithGemini(text, fileType, extractDesign, customPrompt);
     
     // デザイン情報の有無をコンソールに表示
     if (extractDesign && result.designInfo) {
@@ -690,7 +693,11 @@ export async function processAndReviewFile(filePath: string, extractDesign: bool
  * 既存の関数との互換性を保つためのエイリアス
  * デザイン情報が必要な場合は extractDesign パラメータを必ず true にする
  */
-export const reviewTextWithGemini = async (text: string, extractDesign: boolean = false): Promise<{
+export const reviewTextWithGemini = async (
+  text: string, 
+  extractDesign: boolean = false,
+  customPrompt: string = ""
+): Promise<{
   correctedText: string;
   designInfo?: DesignInfo;
   designInfoString?: string;
@@ -700,7 +707,12 @@ export const reviewTextWithGemini = async (text: string, extractDesign: boolean 
     const fileType = "テキスト"; // デフォルトファイルタイプ
     console.log(`reviewTextWithGemini 呼び出し (デザイン抽出: ${extractDesign})`);
     
-    const result = await processWithGemini(text, fileType, extractDesign);
+    // カスタムプロンプトがある場合はログに出力
+    if (customPrompt) {
+      console.log("カスタムプロンプトが指定されています:", customPrompt.substring(0, 100) + (customPrompt.length > 100 ? "..." : ""));
+    }
+    
+    const result = await processWithGemini(text, fileType, extractDesign, customPrompt);
     
     // デザイン情報を文字列に変換（存在する場合）
     let designInfoString: string | undefined = undefined;

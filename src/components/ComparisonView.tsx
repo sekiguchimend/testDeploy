@@ -1,7 +1,6 @@
 import React, { useState, useEffect, JSX } from 'react';
 // import * as diff from 'diff';
 const diff = require('diff')
-import { convertCorrectedDocumentToFile, downloadBlob } from './documentConverter';
 
 interface DesignInfo {
   fonts: string[];
@@ -838,36 +837,7 @@ tokenDiffs.forEach((part: DiffResult<string>) => {
         );
     }
   };
-  const handleDownloadDocument = async (format: 'pdf' | 'docx' | 'txt' | 'html' | 'markdown') => {
-    try {
-      // 添削後のコンテンツを含む要素を取得
-      const correctedDocumentElement = document.querySelector('.corrected-document .content');
-      
-      if (!correctedDocumentElement) {
-        throw new Error('ドキュメントコンテンツが見つかりません');
-      }
-
-      // ファイル名を生成
-      const fileName = `添削済み職務経歴書_${new Date().toISOString().split('T')[0]}`;
-
-      // ドキュメントを変換
-      const blob = await convertCorrectedDocumentToFile(
-        correctedDocumentElement as HTMLElement, 
-        { 
-          format, 
-          fileName,
-          designInfo: activeDesignInfo // デザイン情報を渡す
-        }
-      );
-
-      // ダウンロード
-      downloadBlob(blob, `${fileName}.${format}`);
-
-    } catch (error) {
-      console.error('ダウンロード中にエラーが発生しました:', error);
-      alert('ダウンロードに失敗しました。');
-    }
-  };
+ 
   // リスト項目を適切にグループ化
   const renderParagraphsWithListGrouping = (paragraphs: ParagraphWithDiff[], isOriginal: boolean) => {
     const result: JSX.Element[] = [];
@@ -960,48 +930,7 @@ tokenDiffs.forEach((part: DiffResult<string>) => {
           <span>移動された段落</span>
         </div>
       </div>
-      <div className="flex flex-wrap gap-2">
-      <button
-    onClick={() => handleDownloadDocument('pdf')}
-    className="bg-primary text-white px-3 py-2 rounded-lg transition-all 
-               hover:bg-primary/90 active:scale-95 flex items-center 
-               justify-center gap-2 text-sm font-medium"
-  >
-    PDF
-  </button>
-  <button
-    onClick={() => handleDownloadDocument('docx')}
-    className="bg-secondary text-gray-800 px-3 py-2 rounded-lg transition-all 
-               hover:bg-secondary/90 active:scale-95 flex items-center 
-               justify-center gap-2 text-sm font-medium"
-  >
-    Word
-  </button>
-  <button
-    onClick={() => handleDownloadDocument('txt')}
-    className="bg-gray-100 text-gray-800 px-3 py-2 rounded-lg transition-all 
-               hover:bg-gray-200 active:scale-95 flex items-center 
-               justify-center gap-2 text-sm font-medium"
-  >
-    テキスト
-  </button>
-  <button
-    onClick={() => handleDownloadDocument('html')}
-    className="bg-gray-100 text-gray-800 px-3 py-2 rounded-lg transition-all 
-               hover:bg-gray-200 active:scale-95 flex items-center 
-               justify-center gap-2 text-sm font-medium"
-  >
-    HTML
-  </button>
-  <button
-    onClick={() => handleDownloadDocument('markdown')}
-    className="bg-gray-100 text-gray-800 px-3 py-2 rounded-lg transition-all 
-               hover:bg-gray-200 active:scale-95 flex items-center 
-               justify-center gap-2 text-sm font-medium"
-  >
-    Markdown
-  </button>
-        </div>
+      
     </div>
   );
 };

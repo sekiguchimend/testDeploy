@@ -4,6 +4,8 @@ import * as path from 'path';
 import * as os from 'os';
 import { v4 as uuidv4 } from 'uuid';
 import { processFile, reviewTextWithGemini, updateFileWithReviewedText, convertToPdfWithLibreOffice } from "@/lib/file-processor";
+import { saveResumeFile } from "@/lib/resumeService";
+import supabase from "@/lib/supabase";
 
 // 一時ディレクトリのパス
 const TEMP_DIR = path.join(os.tmpdir(), 'file-processor');
@@ -31,49 +33,86 @@ export async function POST(req: NextRequest) {
     
     // デザイン情報を抽出するかどうかのフラグ
     const extractDesign = formData.get("extractDesign") === "true";
+    
+    // 追加のプロンプト（カスタム指示）を取得
+    const customPrompt = formData.get("customPrompt") as string || "";
+    
+    // 直接テキスト入力の場合（ファイルではなくテキストから添削する場合）
+    const directText = formData.get("text") as string || "";
+    const isDirectText = !!directText;
 
-    // ファイルの検証
-    if (!file) {
-      return NextResponse.json(
-        { error: "ファイルがアップロードされていません" },
-        { status: 400 }
-      );
+    // 投稿ユーザー情報（認証を実装する場合に使用）
+    const userName = formData.get("userName") as string || "ゲストユーザー";
+
+    // ファイルの検証（直接テキスト入力の場合はスキップ）
+    if (!isDirectText) {
+      if (!file) {
+        return NextResponse.json(
+          { error: "ファイルがアップロードされていません" },
+          { status: 400 }
+        );
+      }
+
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        return NextResponse.json(
+          { error: "無効なファイル形式です。PDF、Word、ODT、テキストファイルのみ対応しています" },
+          { status: 400 }
+        );
+      }
+
+      if (file.size > MAX_FILE_SIZE) {
+        return NextResponse.json(
+          { error: "ファイルサイズが大きすぎます (最大10MB)" },
+          { status: 400 }
+        );
+      }
     }
 
-    if (!ALLOWED_TYPES.includes(file.type)) {
-      return NextResponse.json(
-        { error: "無効なファイル形式です。PDF、Word、ODT、テキストファイルのみ対応しています" },
-        { status: 400 }
-      );
-    }
+    let tempFilePath = '';
+    let originalText = '';
+    let fileType = '';
+    let fileName = '';
+    let fileSize = 0;
 
-    if (file.size > MAX_FILE_SIZE) {
-      return NextResponse.json(
-        { error: "ファイルサイズが大きすぎます (最大10MB)" },
-        { status: 400 }
-      );
+    if (isDirectText) {
+      // 直接テキスト入力の場合
+      originalText = directText;
+      fileName = "text_input.txt";
+      fileType = "text/plain";
+      fileSize = Buffer.byteLength(directText, 'utf8');
+      
+      // 一時ファイルを作成（APIの後続処理のため）
+      tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_${fileName}`);
+      fs.writeFileSync(tempFilePath, directText);
+    } else {
+      // ファイルからの場合
+      const buffer = Buffer.from(await file.arrayBuffer());
+      fileName = file.name;
+      fileType = file.type;
+      fileSize = file.size;
+      
+      // ファイルを一時ディレクトリに保存
+      tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_${fileName}`);
+      fs.writeFileSync(tempFilePath, buffer);
+      
+      // ファイルからテキストを抽出
+      const processedFile = await processFile(tempFilePath, false);
+      originalText = processedFile.originalText;
     }
-
-    // ファイルを一時ディレクトリに保存
-    const buffer = Buffer.from(await file.arrayBuffer());
-    const fileName = file.name;
-    const tempFilePath = path.join(TEMP_DIR, `${uuidv4()}_${fileName}`);
-    fs.writeFileSync(tempFilePath, buffer);
 
     try {
-      // ファイルを処理
-      const processedFile = await processFile(tempFilePath, false); // extractDesign フラグは不要になった
-
-      // テキストの添削とデザイン情報の取得（Geminiから一緒に返される）
+      // テキストの添削とデザイン情報の取得
       console.log("テキスト添削を開始します...");
       const result = await reviewTextWithGemini(
-        processedFile.originalText, 
-        extractDesign
+        originalText, 
+        extractDesign,
+        customPrompt // カスタムプロンプトを渡す
       );
 
       // Geminiからの返り値をチェック
       const correctedText = result.correctedText || ""; // デフォルト値を設定
       const designInfo = result.designInfo;
+      const jsonResponse = result.jsonResponse; // JSONレスポンスがあれば保存
 
       // correctedText が空文字の場合のエラーチェック
       if (!correctedText) {
@@ -83,7 +122,16 @@ export async function POST(req: NextRequest) {
       console.log("テキスト添削が完了しました");
 
       // 添削されたテキストでファイルを更新
+      const processedFile = {
+        originalText,
+        filePath: tempFilePath,
+        fileName,
+        fileType: path.extname(fileName),
+        designInfo
+      };
+      
       const reviewedFilePath = await updateFileWithReviewedText(correctedText, processedFile);
+      console.log(`添削済みファイルを作成しました: ${path.basename(reviewedFilePath)}`);
       
       // 結果のダウンロード情報
       let downloadInfo = {
@@ -92,10 +140,10 @@ export async function POST(req: NextRequest) {
       };
       
       // PDFに変換（テキストファイルとWordファイルの場合）
-      if (file.type === 'text/plain' || 
-          file.type === 'application/msword' || 
-          file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-          file.type === 'application/vnd.oasis.opendocument.text') {
+      if (fileType === 'text/plain' || 
+          fileType === 'application/msword' || 
+          fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+          fileType === 'application/vnd.oasis.opendocument.text') {
         try {
           const pdfPath = await convertToPdfWithLibreOffice(reviewedFilePath);
           downloadInfo.pdfFilePath = pdfPath;
@@ -105,15 +153,64 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // 結果を返す
+      // 添削結果のファイル名を設定（表示用）
       const downloadFileName = `reviewed_${fileName}`;
+      
+      // ローカルパスのみを使用し、Supabaseは使用しない
+      let fileId: number | undefined;
+      let localFilePath = reviewedFilePath;
+      
+      try {
+        // 保存用のメタデータを作成
+        const metadata = {
+          fileType,
+          fileSize,
+          originalFileName: fileName,
+          reviewedFileName: downloadFileName,
+          designInfoAvailable: !!designInfo,
+          hasPdf: !!downloadInfo.pdfFilePath,
+          processedAt: new Date().toISOString(),
+          customPrompt: customPrompt || undefined,
+          originalText, // 元のテキストもメタデータに保存
+          correctedText, // 添削後のテキストもメタデータに保存
+          localFilePath: path.basename(reviewedFilePath) // ローカルファイルパスを保存
+        };
+        
+        // データベースに保存（ファイルパスはローカルのパスを使用）
+        const saveResult = await saveResumeFile(
+          downloadFileName,
+          path.basename(reviewedFilePath), // ファイル名のみを保存
+          originalText,
+          correctedText,
+          userName,
+          metadata
+        );
+        
+        if (saveResult.success) {
+          fileId = saveResult.file_id;
+          console.log(`ファイル情報をデータベースに保存しました。ID: ${fileId}`);
+        }
+      } catch (dbError) {
+        console.error("ファイル情報の保存エラー:", dbError);
+        // データベース保存の失敗はプロセス全体を停止させない
+      }
+
+      // 結果を返す
       const response: any = {
-        originalText: processedFile.originalText,
+        originalText: originalText,
         correctedText: correctedText,
-        fileType: processedFile.fileType.replace('.', ''),
+        fileType: fileType,
         downloadUrl: `/api/download?file=${encodeURIComponent(path.basename(reviewedFilePath))}`,
-        downloadFileName: downloadFileName
+        downloadFileName: downloadFileName,
+        reviewedFilePath: path.basename(reviewedFilePath),
+        fileSize: fileSize,
+        jsonResponse: jsonResponse
       };
+      
+      // ファイルIDがある場合は追加
+      if (fileId) {
+        response.fileId = fileId;
+      }
       
       // デザイン情報を抽出した場合はレスポンスに追加
       if (extractDesign && designInfo) {
@@ -189,7 +286,7 @@ export async function GET(req: NextRequest) {
     const response = new NextResponse(fileBuffer, {
       headers: {
         'Content-Type': contentType,
-        'Content-Disposition': `attachment; filename="${fileParam}"`,
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(fileParam)}"`,
       },
     });
     
