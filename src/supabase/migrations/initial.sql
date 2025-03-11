@@ -7,7 +7,9 @@ CREATE TABLE resume_files (
   file_path TEXT NOT NULL,                        -- ファイルのパス
   original_text TEXT,                             -- 元のテキスト
   corrected_text TEXT,                            -- 添削後のテキスト
-  uploaded_at TIMESTAMPTZ DEFAULT NOW(),          -- アップロード日時
+  uploaded_at TIMESTAMPTZ DEFAULT NOW(), 
+  original_text TEXT NOT NULL,
+  corrected_text TEXT NOT NULL,         -- アップロード日時
   metadata JSONB DEFAULT '{}'::JSONB              -- その他のメタデータ
 );
 

@@ -6,7 +6,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { processFile, reviewTextWithGemini, updateFileWithReviewedText, convertToPdfWithLibreOffice } from "@/lib/file-processor";
 import { saveResumeFile } from "@/lib/resumeService";
 import { processRestrictedKeywords } from "@/lib/keywordService";
-import supabase from "@/lib/supabase";
 
 // 一時ディレクトリのパス
 const TEMP_DIR = path.join(os.tmpdir(), 'file-processor');
@@ -32,7 +31,71 @@ const ALLOWED_TYPES = [
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 
+// リクエストのバリデーション関数
+function validateRequest(req: NextRequest) {
+  // IPアドレスの制限などを追加できます
+  const allowedIPs = process.env.ALLOWED_IPS 
+    ? process.env.ALLOWED_IPS.split(',') 
+    : [];
+  
+  const clientIP = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
+
+  if (allowedIPs.length > 0 && !allowedIPs.includes(clientIP)) {
+    console.warn(`未承認のIPアドレスからのアクセス: ${clientIP}`);
+    return false;
+  }
+
+  return true;
+}
+
+// テンポラリファイルのクリーンアップ関数
+function cleanupTempFiles() {
+  try {
+    const now = Date.now();
+    const files = fs.readdirSync(TEMP_DIR);
+    
+    files.forEach(file => {
+      const filePath = path.join(TEMP_DIR, file);
+      const stats = fs.statSync(filePath);
+      
+      // 24時間以上経過したファイルを削除
+      if (now - stats.mtime.getTime() > 24 * 60 * 60 * 1000) {
+        try {
+          fs.unlinkSync(filePath);
+          console.log(`古いテンポラリファイルを削除: ${file}`);
+        } catch (deleteError) {
+          console.error(`テンポラリファイル削除エラー: ${file}`, deleteError);
+        }
+      }
+    });
+  } catch (error) {
+    console.error("テンポラリファイルのクリーンアップ中にエラーが発生:", error);
+  }
+}
+
+// エラーハンドリング関数
+function handleError(error: any, context = "一般的なエラー") {
+  console.error(`${context}:`, error);
+  return {
+    success: false,
+    error: {
+      message: error.message,
+      name: error.name,
+      context
+    }
+  };
+}
+
+// テンポラリファイルのクリーンアップを定期的に実行（サーバーコンポーネントでのみ動作）
+if (typeof window === 'undefined') {
+  setInterval(cleanupTempFiles, 24 * 60 * 60 * 1000); // 24時間ごと
+}
+
 export async function POST(req: NextRequest) {
+  // タイマーを開始
+  const startTime = Date.now();
+  console.log("添削プロセス開始");
+
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File;
@@ -80,6 +143,9 @@ export async function POST(req: NextRequest) {
     let fileName = '';
     let fileSize = 0;
 
+    // 処理開始時間のログ
+    console.log(`ファイル処理開始: ${new Date().toISOString()}`);
+
     if (isDirectText) {
       // 直接テキスト入力の場合
       originalText = directText;
@@ -106,11 +172,13 @@ export async function POST(req: NextRequest) {
       originalText = processedFile.originalText;
     }
 
+    // キーワードチェック処理
+    let processedText = originalText;
+    let warnings: any[] = [];
+
     try {
       // 禁止キーワードのチェックと処理
       const keywordResult = await processRestrictedKeywords(originalText);
-      let processedText = originalText;
-      let warnings = [];
       
       if (!keywordResult.success) {
         console.warn("キーワードチェックエラー:", keywordResult.error_message);
@@ -132,11 +200,15 @@ export async function POST(req: NextRequest) {
         
         console.log(`キーワードチェック: ${warnings.length}件の制限キーワードを検出しました`);
       }
+    } catch (keywordError) {
+      console.error("キーワード処理中のエラー:", keywordError);
+    }
 
-      // カスタムプロンプトを準備（禁止キーワードが含まれていないか確認）
-      let sanitizedCustomPrompt = customPrompt;
-      
-      if (customPrompt) {
+    // カスタムプロンプトのサニタイズ
+    let sanitizedCustomPrompt = customPrompt;
+    
+    if (customPrompt) {
+      try {
         const promptKeywordResult = await processRestrictedKeywords(customPrompt);
         if (promptKeywordResult.success && promptKeywordResult.containsRestricted) {
           // カスタムプロンプトから禁止キーワードを削除
@@ -151,10 +223,18 @@ export async function POST(req: NextRequest) {
           
           console.log("カスタムプロンプトから制限キーワードを削除しました");
         }
+      } catch (promptError) {
+        console.error("カスタムプロンプト処理中のエラー:", promptError);
       }
+    }
 
-      // テキストの添削とデザイン情報の取得
-      console.log("テキスト添削を開始します...");
+    // テキスト添削プロセス
+    console.log("テキスト添削を開始します...");
+    let correctedText = '';
+    let designInfo = null;
+    let jsonResponse = null;
+
+    try {
       const result = await reviewTextWithGemini(
         processedText, // 処理済みのテキストを使用
         extractDesign,
@@ -162,151 +242,149 @@ export async function POST(req: NextRequest) {
       );
 
       // Geminiからの返り値をチェック
-      const correctedText = result.correctedText || ""; // デフォルト値を設定
-      const designInfo = result.designInfo;
-      const jsonResponse = result.jsonResponse; // JSONレスポンスがあれば保存
+      correctedText = result.correctedText || ""; // デフォルト値を設定
+      designInfo = result.designInfo;
+      jsonResponse = result.jsonResponse; // JSONレスポンスがあれば保存
 
       // correctedText が空文字の場合のエラーチェック
       if (!correctedText) {
         throw new Error("テキストの添削に失敗しました。");
       }
-
-      console.log("テキスト添削が完了しました");
-
-      // 添削されたテキストでファイルを更新
-      const processedFile = {
-        originalText,
-        filePath: tempFilePath,
-        fileName,
-        fileType: path.extname(fileName),
-        designInfo
-      };
-      
-      const reviewedFilePath = await updateFileWithReviewedText(correctedText, processedFile);
-      console.log(`添削済みファイルを作成しました: ${path.basename(reviewedFilePath)}`);
-      
-      // 結果のダウンロード情報
-      let downloadInfo = {
-        textFilePath: reviewedFilePath,
-        pdfFilePath: null as string | null
-      };
-      
-      // PDFに変換（テキストファイルとWordファイルの場合）
-      if (fileType === 'text/plain' || 
-          fileType === 'application/msword' || 
-          fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
-          fileType === 'application/vnd.oasis.opendocument.text') {
-        try {
-          const pdfPath = await convertToPdfWithLibreOffice(reviewedFilePath);
-          downloadInfo.pdfFilePath = pdfPath;
-        } catch (pdfError) {
-          console.warn("PDFへの変換中にエラーが発生しました:", pdfError);
-          // PDF変換の失敗はプロセス全体を停止させない
-        }
-      }
-
-      // 添削結果のファイル名を設定（表示用）
-      const downloadFileName = `reviewed_${fileName}`;
-      
-      // ローカルパスのみを使用し、Supabaseは使用しない
-      let fileId: number | undefined;
-      let localFilePath = reviewedFilePath;
-      
-      try {
-        // 保存用のメタデータを作成
-        const metadata = {
-          fileType,
-          fileSize,
-          originalFileName: fileName,
-          reviewedFileName: downloadFileName,
-          designInfoAvailable: !!designInfo,
-          hasPdf: !!downloadInfo.pdfFilePath,
-          processedAt: new Date().toISOString(),
-          customPrompt: sanitizedCustomPrompt || undefined,
-          originalText, // 元のテキストもメタデータに保存
-          correctedText, // 添削後のテキストもメタデータに保存
-          localFilePath: path.basename(reviewedFilePath), // ローカルファイルパスを保存
-          hasWarnings: warnings.length > 0,
-          warningsCount: warnings.length
-        };
-        
-        // データベースに保存（ファイルパスはローカルのパスを使用）
-        const saveResult = await saveResumeFile(
-          downloadFileName,
-          path.basename(reviewedFilePath), // ファイル名のみを保存
-          userName,metadata
-          
-          
-        );
-        
-        if (saveResult.success) {
-          fileId = saveResult.file_id;
-          console.log(`ファイル情報をデータベースに保存しました。ID: ${fileId}`);
-        }
-      } catch (dbError) {
-        console.error("ファイル情報の保存エラー:", dbError);
-        // データベース保存の失敗はプロセス全体を停止させない
-      }
-
-      // 結果を返す
-      const response: any = {
-        originalText: originalText,
-        correctedText: correctedText,
-        fileType: fileType,
-        downloadUrl: `/api/download?file=${encodeURIComponent(path.basename(reviewedFilePath))}`,
-        downloadFileName: downloadFileName,
-        reviewedFilePath: path.basename(reviewedFilePath),
-        fileSize: fileSize,
-        jsonResponse: jsonResponse
-      };
-      
-      // 警告がある場合はレスポンスに追加
-      if (warnings.length > 0) {
-        response.warnings = warnings;
-      }
-      
-      // ファイルIDがある場合は追加
-      if (fileId) {
-        response.fileId = fileId;
-      }
-      
-      // デザイン情報を抽出した場合はレスポンスに追加
-      if (extractDesign && designInfo) {
-        response.designInfo = designInfo;
-      }
-      
-      // PDF変換が成功した場合はダウンロードURLを追加
-      if (downloadInfo.pdfFilePath) {
-        response.pdfDownloadUrl = `/api/download?file=${encodeURIComponent(path.basename(downloadInfo.pdfFilePath))}&type=pdf`;
-      }
-
-      return NextResponse.json(response);
-    } catch (processError) {
-      // 一時ファイルを削除（エラー処理）
-      try {
-        if (fs.existsSync(tempFilePath)) {
-          fs.unlinkSync(tempFilePath);
-        }
-      } catch (cleanupError) {
-        console.error("一時ファイル削除中にエラーが発生:", cleanupError);
-      }
-
-      throw processError; // 元のエラーを再スロー
+    } catch (reviewError) {
+      console.error("テキスト添削中のエラー:", reviewError);
+      throw reviewError;
     }
+
+    console.log("テキスト添削が完了しました");
+
+    // 添削されたテキストでファイルを更新
+    const processedFile = {
+      originalText,
+      filePath: tempFilePath,
+      fileName,
+      fileType: path.extname(fileName),
+      designInfo
+    };
+    
+    const reviewedFilePath = await updateFileWithReviewedText(correctedText, processedFile);
+    console.log(`添削済みファイルを作成しました: ${path.basename(reviewedFilePath)}`);
+    
+    // PDF変換処理
+    let pdfUrl = null;
+    let pdfFilePath = null;
+    if (fileType === 'text/plain' || 
+        fileType === 'application/msword' || 
+        fileType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        fileType === 'application/vnd.oasis.opendocument.text') {
+      try {
+        pdfFilePath = await convertToPdfWithLibreOffice(reviewedFilePath);
+        pdfUrl = `/api/download?file=${encodeURIComponent(path.basename(pdfFilePath))}&type=pdf`;
+        console.log(`PDFを生成しました: ${path.basename(pdfFilePath)}`);
+      } catch (pdfError) {
+        console.warn("PDFへの変換中にエラーが発生しました:", pdfError);
+      }
+    }
+
+    // 添削結果のファイル名を設定
+    const downloadFileName = `reviewed_${fileName}`;
+    
+    // メタデータを準備
+    const metadata = {
+      fileType,
+      fileSize,
+      originalFileName: fileName,
+      reviewedFileName: downloadFileName,
+      designInfoAvailable: !!designInfo,
+      hasPdf: !!pdfFilePath,
+      processedAt: new Date().toISOString(),
+      customPrompt: sanitizedCustomPrompt || undefined,
+      originalText, // 元のテキストもメタデータに保存
+      correctedText, // 添削後のテキストもメタデータに保存
+      localFilePath: path.basename(reviewedFilePath),
+      hasWarnings: warnings.length > 0,
+      warningsCount: warnings.length,
+      pdfUrl,
+      warnings: warnings.length > 0 ? warnings : undefined
+    };
+    
+    // データベースに保存
+    let saveResult;
+    try {
+      saveResult = await saveResumeFile(
+        downloadFileName,
+        path.basename(reviewedFilePath),
+        userName,
+        metadata
+      );
+
+      // 保存結果をログ出力
+      console.log("Supabaseへの保存結果:", {
+        success: saveResult.success,
+        fileId: saveResult.file_id,
+        error: saveResult.error
+      });
+    } catch (saveError) {
+      console.error("ファイル保存中の予期せぬエラー:", saveError);
+    }
+
+    // 結果を返す
+    const response: any = {
+      originalText,
+      correctedText,
+      fileType,
+      downloadUrl: `/api/download?file=${encodeURIComponent(path.basename(reviewedFilePath))}`,
+      downloadFileName,
+      reviewedFilePath: path.basename(reviewedFilePath),
+      fileSize,
+      jsonResponse,
+      metadata: {
+        warnings,
+        pdfUrl
+      }
+    };
+    
+    // ファイルIDがある場合は追加
+    if (saveResult?.success && saveResult.file_id) {
+      response.fileId = saveResult.file_id;
+    }
+    
+    // デザイン情報を抽出した場合はレスポンスに追加
+    if (extractDesign && designInfo) {
+      response.designInfo = designInfo;
+    }
+    
+    // PDF変換が成功した場合はダウンロードURLを追加
+    if (pdfFilePath) {
+      response.pdfDownloadUrl = `/api/download?file=${encodeURIComponent(path.basename(pdfFilePath))}&type=pdf`;
+    }
+
+    // 処理時間のログ
+    const endTime = Date.now();
+    console.log(`添削プロセス完了 - 総処理時間: ${(endTime - startTime) / 1000}秒`);
+
+    return NextResponse.json(response);
   } catch (error) {
-    console.error("Error processing file:", error);
+    console.error("予期せぬエラーが発生:", error);
     
     // エラーメッセージをより詳細に
     let errorMessage = "予期せぬエラーが発生しました";
+    let errorDetails = {};
     if (error instanceof Error) {
       errorMessage = error.message;
+      errorDetails = {
+        name: error.name,
+        message: error.message,
+        stack: error.stack
+      };
     }
     
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
+    return NextResponse.json({ 
+      error: errorMessage, 
+      errorDetails 
+    }, { status: 500 });
   }
 }
 
-// 添削結果ファイルのダウンロード用のエンドポイント
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);

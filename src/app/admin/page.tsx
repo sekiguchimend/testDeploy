@@ -42,6 +42,7 @@ import type { ResumeFile, MonthlyStats } from "@/lib/resumeService";
 import type { Keyword } from "@/lib/keywordService";
 import { toast } from "sonner";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import TextComparisonModal from "@/components/TextComparisonModal";
 
 // 円グラフのカラー
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
@@ -58,17 +59,26 @@ export default function AdminDashboard() {
   
   // レジュメファイル管理
   const [resumes, setResumes] = useState<ResumeFile[]>([]);
-  const [loading, setLoading] = useState(true); // 初期ロード時はtrueに変更
+  const [loading, setLoading] = useState(true);
   const [keywordsLoading, setKeywordsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // テキスト比較モーダル関連
+  const [comparisonModalOpen, setComparisonModalOpen] = useState(false);
+  const [selectedResume, setSelectedResume] = useState<ResumeFile | null>(null);
   
   // 統計データ
   const [monthlyStats, setMonthlyStats] = useState<MonthlyStats[]>([]);
   const [statusStats, setStatusStats] = useState<{[key: string]: number}>({});
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
-  const [statsLoading, setStatsLoading] = useState(true); // 初期ロード時はtrueに変更
-  const [totalUploads, setTotalUploads] = useState(0); // 総アップロード数を追跡
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [totalUploads, setTotalUploads] = useState(0);
 
+  // テキスト比較モーダルを開く関数
+  const openTextComparisonModal = (resume: ResumeFile) => {
+    setSelectedResume(resume);
+    setComparisonModalOpen(true);
+  };
   // キーワード一覧をSupabaseから取得
   const fetchKeywords = async () => {
     if (keywordsLoading && !keywords.length) {
@@ -486,7 +496,7 @@ export default function AdminDashboard() {
                         </TableCell>
                         <TableCell>{formatDate(resume.uploaded_at)}</TableCell>
                         <TableCell className="truncate max-w-[150px]">{resume.user_name || 'ゲストユーザー'}</TableCell>
-                        <TableCell className="text-right">
+                        {/* <TableCell className="text-right">
                           <Button
                             variant="ghost"
                             size="sm"
@@ -496,8 +506,35 @@ export default function AdminDashboard() {
                             <Download className="h-4 w-4 mr-1" />
                             ダウンロード
                           </Button>
-                        </TableCell>
+                        </TableCell> */}
+                        <TableCell className="text-right">
+  <Button
+    variant="ghost"
+    size="sm"
+    onClick={() => openTextComparisonModal(resume)}
+    className="hover:bg-blue-50 text-blue-600"
+  >
+    <Edit2 className="h-4 w-4 mr-1" />
+    テキスト比較
+  </Button>
+</TableCell>
+                        {selectedResume && (
+  <TextComparisonModal
+    originalText={selectedResume.original_text || ''}
+    correctedText={selectedResume.corrected_text || ''}
+    fileName={selectedResume.title || ''}
+    isOpen={comparisonModalOpen}
+    onOpenChange={(open) => {
+      setComparisonModalOpen(open);
+      if (!open) {
+        setSelectedResume(null);
+      }
+    }}
+  />
+)}
+                        
                       </TableRow>
+                       
                     ))
                   )}
                 </TableBody>

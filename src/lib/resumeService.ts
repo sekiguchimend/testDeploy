@@ -45,8 +45,12 @@ export async function saveResumeFile(
   metadata: any = {}
 ): Promise<UploadResult> {
   try {
-    // メタデータから不要な項目を削除
-    const { correctedText, originalText, ...cleanedMetadata } = metadata;
+    // メタデータから不要な項目を抽出
+    const { 
+      originalText, 
+      correctedText, 
+      ...cleanedMetadata 
+    } = metadata;
 
     // メタデータを拡張
     const enhancedMetadata = {
@@ -56,11 +60,29 @@ export async function saveResumeFile(
       timestamp: new Date().toISOString()
     };
     
-    console.log("Supabase DB insert attempt:", {
-      title: fileName,
-      user_name: userName,
-      file_path: filePath
+    // デバッグログを追加
+    console.log("Supabase保存前のデバッグ情報:", {
+      fileName,
+      filePath,
+      userName,
+      originalTextLength: originalText ? originalText.length : null,
+      correctedTextLength: correctedText ? correctedText.length : null,
+      metadata: JSON.stringify(enhancedMetadata).substring(0, 500)
     });
+    
+    // 文字数が長すぎる場合は切り詰める（Supabaseの制限に対応）
+    const MAX_TEXT_LENGTH = 1000000; // 100万文字まで
+    const truncatedOriginalText = originalText 
+      ? (originalText.length > MAX_TEXT_LENGTH 
+        ? originalText.substring(0, MAX_TEXT_LENGTH) 
+        : originalText)
+      : null;
+    
+    const truncatedCorrectedText = correctedText 
+      ? (correctedText.length > MAX_TEXT_LENGTH 
+        ? correctedText.substring(0, MAX_TEXT_LENGTH) 
+        : correctedText)
+      : null;
     
     // Supabaseのテーブルにデータを保存
     const { data, error } = await supabase
@@ -72,54 +94,72 @@ export async function saveResumeFile(
           status: '添削済み',
           file_path: filePath,
           metadata: enhancedMetadata,
-          pdf_url: metadata.pdfUrl
+          original_text: truncatedOriginalText,
+          corrected_text: truncatedCorrectedText,
+          pdf_url: metadata.pdfUrl,
+          uploaded_at: new Date().toISOString()
         }
       ])
       .select();
     
+    // エラーハンドリング
     if (error) {
       console.error('データベース挿入エラーの詳細:', {
         code: error.code,
         message: error.message,
         hint: error.hint,
-        details: error.details
+        details: JSON.stringify(error.details),
+        fullError: JSON.stringify(error)
       });
       
-      // エラー時もアプリケーションを継続
       return { 
-        success: true, 
+        success: false, 
         error,
         error_details: {
           code: error.code,
-          message: error.message
+          message: error.message,
+          fullError: JSON.stringify(error)
         },
         file_path: filePath,
-        
       };
     }
+    
+    // 保存成功時のログ
+    console.log('データベース保存成功:', {
+      fileId: data?.[0]?.id,
+      title: fileName,
+      originalTextSaved: !!truncatedOriginalText,
+      correctedTextSaved: !!truncatedCorrectedText
+    });
     
     return { 
       success: true, 
       file_id: data?.[0]?.id,
       file_path: filePath,
-      
     };
   } catch (error: any) {
-    console.error('ファイル情報の保存エラー:', error);
+    // 予期せぬエラーのハンドリング
+    console.error('ファイル情報の保存エラー:', {
+      message: error.message,
+      name: error.name,
+      stack: error.stack
+    });
     
-    // エラーがあっても処理を続行できるよう、成功を返す（一時的な対応）
     return { 
-      success: true, 
+      success: false, 
       error,
       error_details: {
         message: error.message || 'Unknown error',
+        name: error.name,
         time: new Date().toISOString()
       },
       file_path: filePath,
-     
     };
   }
 }
+
+// 他の関数（getAllResumeFiles、getResumeFile等）は前回と同じなので省略
+// ...
 
 /**
  * 全ての添削済みファイルを取得 - シンプル化した実装
