@@ -18,13 +18,14 @@ import {
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import ComparisonView from "./ComparisonView";
 import { DownloadDialog } from "./DownloadDialog";
-
+import RecommendationDisplay from "./RecommendationDisplay"
 // 警告情報の型定義
 interface KeywordWarning {
   keyword: string;
   action: string;
   message: string;
 }
+import defaultDesignInfo from '../lib/defaultDesignInfo';  // パスは実際の場所に合わせて調整
 
 // DownloadDialogコンポーネントのプロパティ型を定義
 
@@ -34,6 +35,7 @@ interface DownloadDialogProps {
   fileSize?: number;
   designInfo?: any;
   correctedText?: string;
+  recommendationText: string;
 }
 
 // コンポーネントのプロパティ型を定義
@@ -41,6 +43,7 @@ interface FileUploadProps {
   onFileProcessed?: (data: {
     originalText: string;
     correctedText: string;
+    recommendationText: string;
     designInfo?: any;
     downloadUrl: string;
     pdfDownloadUrl?: string;
@@ -75,6 +78,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
   const [processedData, setProcessedData] = useState<{
     originalText: string;
     correctedText: string;
+    recommendationText: string;
     downloadUrl?: string;
     downloadFileName?: string;
     designInfo?: any;
@@ -135,7 +139,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
       onFileProcessed({
         originalText: processedData.originalText,
         correctedText: processedData.correctedText,
-        designInfo: processedData.designInfo,
+        recommendationText: processedData.recommendationText,
+        designInfo: processedData.designInfo|| defaultDesignInfo,
         downloadUrl: processedData.downloadUrl || '',
         pdfDownloadUrl: processedData.pdfDownloadUrl,
         warnings: processedData.warnings
@@ -289,10 +294,11 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
         correctedText: data.correctedText,
         downloadUrl: data.downloadUrl,
         downloadFileName: data.downloadFileName,
-        designInfo: data.designInfo,
+        designInfo: data.designInfo|| defaultDesignInfo,
         pdfDownloadUrl: data.pdfDownloadUrl,
         jsonResponse: data.jsonResponse,
-        warnings: data.warnings
+        warnings: data.warnings,
+        recommendationText: data.recommendationText
       };
 
       setProcessedData(processedDataResult);
@@ -383,10 +389,11 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
         correctedText: data.correctedText,
         downloadUrl: data.downloadUrl,
         downloadFileName: data.downloadFileName,
-        designInfo: data.designInfo,
+        designInfo: data.designInfo|| defaultDesignInfo,
         pdfDownloadUrl: data.pdfDownloadUrl,
         jsonResponse: data.jsonResponse,
-        warnings: data.warnings
+        warnings: data.warnings,
+        recommendationText: data.recommendationText
       };
       
       setProcessedData(processedDataResult);
@@ -637,7 +644,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
             designInfo={processedData.designInfo}
             jsonResponse={processedData.jsonResponse}
           />
-          
+       <RecommendationDisplay recommendationText={processedData.recommendationText} />
+
           {/* 操作ボタン */}
           <div className="flex flex-wrap justify-center gap-4 mt-8">
             {/* ダウンロードボタン */}

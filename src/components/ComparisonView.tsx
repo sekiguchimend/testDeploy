@@ -1,5 +1,7 @@
 import React, { useState, useEffect, JSX } from 'react';
 // import * as diff from 'diff';
+import defaultDesignInfo from '../lib/defaultDesignInfo';  // パスは実際の場所に合わせて調整
+
 const diff = require('diff')
 
 interface DesignInfo {
@@ -392,7 +394,8 @@ const ComparisonView: React.FC<ComparisonViewProps> = ({
   }, [correctedText, propDesignInfo, jsonResponse]);
 
   // 実際に使用するデザイン情報
-  const activeDesignInfo = propDesignInfo || extractedDesignInfo;
+  // const activeDesignInfo = propDesignInfo || extractedDesignInfo || defaultDesignInfo;
+  const activeDesignInfo =  defaultDesignInfo;
 
   // CSSスタイルをヘッドに追加
   useEffect(() => {

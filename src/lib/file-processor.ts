@@ -66,6 +66,7 @@ export interface DesignInfo {
 // Gemini APIからのレスポンスインターフェース
 export interface GeminiResponse {
   correctedText: string;
+  recommendationText: string;
   designInfo?: DesignInfo;
 }
 
@@ -73,6 +74,7 @@ export interface GeminiResponse {
 export interface ProcessResult {
   originalText: string;
   correctedText: string;
+  recommendationText: string;
   designInfo?: DesignInfo;
   jsonResponse?: string; // 追加: 元のJSON文字列
 }
@@ -113,6 +115,7 @@ export function parseGeminiResponse(response: string): GeminiResponse {
     // 期待する形式かチェック
     if (parsedData && typeof parsedData === 'object') {
       const result = {
+        recommendationText: parsedData.recommendationText || '',
         correctedText: parsedData.correctedText || '',
         designInfo: parsedData.designInfo
       };
@@ -128,6 +131,7 @@ export function parseGeminiResponse(response: string): GeminiResponse {
     // 形式が期待と異なる場合
     console.warn("警告: 予期しないレスポンス形式、生のテキストとして使用します");
     return {
+      recommendationText: response,
       correctedText: response,
       designInfo: undefined
     };
@@ -136,6 +140,7 @@ export function parseGeminiResponse(response: string): GeminiResponse {
     
     // JSON解析エラーの場合、テキスト全体をそのまま返す
     return {
+      recommendationText: response,
       correctedText: response,
       designInfo: undefined
     };
@@ -220,6 +225,7 @@ export async function readPdfFile(filePath: string): Promise<string> {
   return data.text;
 }
 
+
 /**
  * Wordファイルを読み込んでテキストを抽出
  */
@@ -290,105 +296,88 @@ export async function processWithGemini(
         prompt = `
         あなたは文書分析と添削のエキスパートです。以下の${fileType}文書を詳細に分析し、指定されたタスクを実行してください。
 
-        【タスク1: 文書構造とデザイン情報の詳細な抽出】
-        まず文書の構造を細かく分析し、以下の情報を抽出してください:
+        【タスク1: 職務経歴書の添削】
+     以下の職務経歴書を添削してください。
+※重要: 元の文書形式とレイアウトを維持してください。マークダウン形式への変換は行わないでください。
+元のテキスト形式を保持し、内容のみを改善してください。
 
-        1. 文書構造の分析:
-           - 大見出し (h1)
-           - 中見出し (h2)
-           - 通常テキスト (paragraph)
-           - その他の要素（リスト項目、強調テキストなど）
+    【タスク2: 推薦書の作成】
+     あなたは優秀な転職エージェントです。以下の職務経歴書から、採用を行っている人事に向けて推薦文を作成してください。推薦ポイントを3つにまとめてください。
+     なるべく具体的に内容を長めにしてほしい。
 
-        2. 各要素ごとの詳細なデザイン情報:
-           - フォント情報（フォントファミリー、フォントサイズ）
-           - 色情報（テキスト色）
-           - 配置情報（テキストの揃え方）
-           - その他のスタイル情報（太さ、行間など）
+推薦書のフォーマットは必ず下記の通りにしてください：
 
-        【タスク2: 職務経歴書の添削】
-        以下の点に注意して職務経歴書として添削してください:
-        - 元の文章構造は維持する
-        - 具体的な成果や数値を強調する
-        - 曖昧な表現は具体的に修正する
-        - 誤字脱字を修正する
-        - 元の文章と同じか少し多いくらいの文章量にする
+
+■求職者概要
+・（求職者の特徴を箇条書きで1つ目）
+・（求職者の特徴を箇条書きで2つ目）
+・（求職者の特徴を箇条書きで3つ目）
+
+◎ （推薦ポイント1のタイトル）
+（推薦ポイント1の詳細説明 - 3-4文以上）
+
+◎ （推薦ポイント2のタイトル）
+（推薦ポイント2の詳細説明 - 3-4文以上）
+
+◎ （推薦ポイント3のタイトル）
+（推薦ポイント3の詳細説明 - 3-4文以上）
+
+<推薦理由>
+（推薦理由の説明 - 3-4文程度）
+
+
         ${customPrompt ? `\n【追加の指示】\n${customPrompt}` : ''}
 
-        【出力形式】
-        下のようにJSONオブジェクトで出力してくださいcssのスタイルはここにあるやつ以外にも模写するために必要なcssを入れてください
+        【タスク3 出力形式】
+        下のようにJSONオブジェクトで出力してください
        {
           "correctedText": "添削後のテキスト全文をここに入れてください",
-          "designInfo": {
-            "fonts": ["フォント名の配列"],
-            "layout": {
-              "pageCount": ページ数,
-              "margins": {
-                "top": "上マージン",
-                "right": "右マージン",
-                "bottom": "下マージン",
-                "left": "左マージン"
-              }
-            },
-            "styles": {
-              "heading1": {
-                "fontSize": "サイズ",
-                "fontFamily": "フォント",
-                "fontWeight": "太さ",
-                "color": "色",
-                "textAlign": "配置"
-              },
-              "heading2": { ... },
-              "paragraph": { ... }
-            },
-            "cssRules": [
-              {
-                "selector": ".heading1",
-                "properties": {
-                  "font-size": "サイズ",
-                  "font-family": "フォント名",
-                  "font-weight": "太さ",
-                  "color": "#HEX色コード",
-                  "text-align": "位置"
-                }
-              },
-              ...
-            ]
-          }
-        }
-        【重要: CSSルールの必須要件】
-        1. 必ず以下の3つの要素タイプに対応するCSSルールを含めてください:
-           - .heading1: 大見出し (h1) 用
-           - .heading2: 中見出し (h2) 用
-           - .paragraph: 通常テキスト用
+          "recommendationText": "作成された推薦書の全文をここにいれてください",
          
-        2. これら3つの必須要素のCSSルールには、以下のプロパティを必ず含めてください:
-           - font-size: フォントサイズ (px単位で指定)
-           - font-family: フォントファミリー
-           - color: テキスト色 (#HEX形式で指定)
-           - text-align: テキストの配置 (center,left, right, justifyのいずれか)
-           - text-alignは一番正確に判定して
-        3. 文書の特性に合わせて、追加の要素（リスト項目など）のCSSルールも定義してください。
-        
-        4. 出力は必ず有効なJSON形式で行ってください。マークダウンのコードブロック（\`\`\`json）や装飾は使用しないでください。
+        }
+     出力は必ず有効なJSON形式で行ってください。マークダウンのコードブロック（\`\`\`json）や装飾は使用しないでください。
 
         ${text}
         `;
       } else {
         // デザイン情報が不要な場合のシンプルなプロンプト
         prompt = `
+         あなたは文書分析と添削のエキスパートです。以下の${fileType}文書を詳細に分析し、指定されたタスクを実行してください。
+
+        【タスク1: 職務履歴書の添削】
         以下の職務経歴書を添削してください。
-        注意点：
-        - 元の文章構造は維持してください
-        - 具体的な成果や数値を強調してください
-        - 曖昧な表現は具体的に修正してください
-        - 誤字脱字を修正してください
-        - 元の文章と同じか少し多いくらいの文章量にしてください
+※重要: 元の文書形式とレイアウトを維持してください。マークダウン形式への変換は行わないでください。
+元のテキスト形式を保持し、内容のみを改善してください。
+【タスク2: 推薦書の作成】
+     あなたは優秀な転職エージェントです。以下の職務経歴書から、採用を行っている人事に向けて推薦文を作成してください。推薦ポイントを3つにまとめてください。
+     なるべく具体的に内容を長めにしてほしい。
+推薦書のフォーマットは必ず下記の通りにしてください：
+
+-------- ここから出力開始 --------
+■求職者概要
+・（求職者の特徴を箇条書きで1つ目）
+・（求職者の特徴を箇条書きで2つ目）
+・（求職者の特徴を箇条書きで3つ目）
+
+◎ （推薦ポイント1のタイトル）
+（推薦ポイント1の詳細説明 - 3-4文以上）
+
+◎ （推薦ポイント2のタイトル）
+（推薦ポイント2の詳細説明 - 3-4文以上）
+
+◎ （推薦ポイント3のタイトル）
+（推薦ポイント3の詳細説明 - 3-4文以上）
+
+<推薦理由>
+（推薦理由の説明 - 3-4文程度）
+-------- ここまで出力する --------
+
         ${customPrompt ? `\n【追加の指示】\n${customPrompt}` : ''}
 
         【出力形式】
         以下の形式のJSONオブジェクトで出力してください:
         
-        {
+        { "recommendationText": "作成した推薦書のテキスト全文をここに入れてください"
           "correctedText": "添削後のテキスト全文をここに入れてください"
         }
 
@@ -403,7 +392,6 @@ export async function processWithGemini(
       const result = await model.generateContent(prompt);
       const response = result.response.text();
       console.log("APIレスポンス受信完了 (長さ:", response.length, "文字)");
-      
       // レスポンスをパース
       try {
         // レスポンスをJSONとしてパース
@@ -432,6 +420,7 @@ export async function processWithGemini(
         }
         
         return {
+          recommendationText: parsedResponse.recommendationText,
           originalText: text,
           correctedText: parsedResponse.correctedText,
           designInfo: parsedResponse.designInfo,
@@ -445,6 +434,7 @@ export async function processWithGemini(
           originalText: text,
           correctedText: response,
           designInfo: undefined,
+          recommendationText: response,
           jsonResponse: response
         };
       }
@@ -696,9 +686,10 @@ export async function processAndReviewFile(
 export const reviewTextWithGemini = async (
   text: string, 
   extractDesign: boolean = false,
-  customPrompt: string = ""
+  customPrompt: string = "",
 ): Promise<{
   correctedText: string;
+  recommendationText: string;
   designInfo?: DesignInfo;
   designInfoString?: string;
   jsonResponse?: string; // 追加: 元のJSON文字列
@@ -728,6 +719,7 @@ export const reviewTextWithGemini = async (
     }
     
     return {
+      recommendationText: result.recommendationText,
       correctedText: result.correctedText,
       designInfo: result.designInfo,
       designInfoString,

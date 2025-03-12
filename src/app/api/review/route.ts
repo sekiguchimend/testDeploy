@@ -56,6 +56,7 @@ function cleanupTempFiles() {
     
     files.forEach(file => {
       const filePath = path.join(TEMP_DIR, file);
+      
       const stats = fs.statSync(filePath);
       
       // 24時間以上経過したファイルを削除
@@ -231,9 +232,10 @@ export async function POST(req: NextRequest) {
     // テキスト添削プロセス
     console.log("テキスト添削を開始します...");
     let correctedText = '';
+    let recommendationText = "";
     let designInfo = null;
     let jsonResponse = null;
-
+   
     try {
       const result = await reviewTextWithGemini(
         processedText, // 処理済みのテキストを使用
@@ -242,10 +244,13 @@ export async function POST(req: NextRequest) {
       );
 
       // Geminiからの返り値をチェック
+      recommendationText = result.recommendationText || "";
       correctedText = result.correctedText || ""; // デフォルト値を設定
       designInfo = result.designInfo;
       jsonResponse = result.jsonResponse; // JSONレスポンスがあれば保存
-
+      if (!recommendationText){
+        throw new Error("推薦書作成に失敗しました")
+      }
       // correctedText が空文字の場合のエラーチェック
       if (!correctedText) {
         throw new Error("テキストの添削に失敗しました。");
@@ -300,6 +305,7 @@ export async function POST(req: NextRequest) {
       customPrompt: sanitizedCustomPrompt || undefined,
       originalText, // 元のテキストもメタデータに保存
       correctedText, // 添削後のテキストもメタデータに保存
+      recommendationText,
       localFilePath: path.basename(reviewedFilePath),
       hasWarnings: warnings.length > 0,
       warningsCount: warnings.length,
@@ -331,6 +337,7 @@ export async function POST(req: NextRequest) {
     const response: any = {
       originalText,
       correctedText,
+      recommendationText,
       fileType,
       downloadUrl: `/api/download?file=${encodeURIComponent(path.basename(reviewedFilePath))}`,
       downloadFileName,
@@ -357,8 +364,9 @@ export async function POST(req: NextRequest) {
     if (pdfFilePath) {
       response.pdfDownloadUrl = `/api/download?file=${encodeURIComponent(path.basename(pdfFilePath))}&type=pdf`;
     }
-
-    // 処理時間のログ
+      
+      console.log(recommendationText)
+        // 処理時間のログ
     const endTime = Date.now();
     console.log(`添削プロセス完了 - 総処理時間: ${(endTime - startTime) / 1000}秒`);
 

@@ -9,7 +9,6 @@ interface ConversionOptions {
   designInfo?: DesignInfo;
   preserveStyles?: boolean; // スタイル保持フラグを追加
 }
-
 // デザイン情報からCSSを生成する関数
 function generateCssFromDesignInfo(designInfo: DesignInfo): string {
   if (!designInfo || !designInfo.cssRules) return '';
@@ -181,16 +180,14 @@ export async function convertCorrectedDocumentToFile(
       throw new Error('html2pdf.js がロードされていません');
     }
 
-    // PDF変換のオプションを拡張
-    const pdfMargins = designInfo?.layout?.margins || { top: '20mm', right: '20mm', bottom: '20mm', left: '20mm' };
-    
     return new Promise((resolve, reject) => {
       const opt = {
+     
         margin: [
-          convertToPx(pdfMargins.top) / 3.779528, // mmをpdfのポイントに変換
-          convertToPx(pdfMargins.right) / 3.779528,
-          convertToPx(pdfMargins.bottom) / 3.779528,
-          convertToPx(pdfMargins.left) / 3.779528
+          60 / 3.779528, // mmをpdfのポイントに変換
+          60 / 3.779528,
+          60 / 3.779528,
+          60 / 3.779528
         ],
         filename: `${fileName}.pdf`,
         image: { type: 'jpeg', quality: 0.98 },
