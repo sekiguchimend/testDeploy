@@ -38,6 +38,14 @@ export interface MonthlyStats {
  * 添削済みファイルの情報をSupabaseに保存
  * 認証不要でデータベースに保存できるようにエラーハンドリングを強化
  */
+/**
+ * 添削済みファイルの情報をSupabaseに保存
+ * 再添削の場合は「再添削」ステータスを設定
+ */
+/**
+ * 添削済みファイルの情報をSupabaseに保存
+ * 新しい添削のみを「再添削」ステータスに設定（過去の添削は更新しない）
+ */
 export async function saveResumeFile(
   fileName: string,
   filePath: string,
@@ -52,12 +60,37 @@ export async function saveResumeFile(
       ...cleanedMetadata 
     } = metadata;
 
+    // 同じファイル名で過去に添削されたかチェック
+    const { data: existingFiles, error: existingError } = await supabase
+      .from('resume_files')
+      .select('id, title')
+      .eq('title', fileName)
+      .eq('user_name', userName);
+
+    // エラーハンドリング
+    if (existingError) {
+      console.warn('既存ファイル検索エラー:', existingError);
+      // エラーがあっても処理を続行
+    }
+
+    // 再添削かどうか判定 - 過去に添削があれば再添削
+    const isReReview = existingFiles && existingFiles.length > 0;
+    
+    // 添削ステータスを設定 - 現在の新しい添削のみ「再添削」とする
+    const status = isReReview ? '再添削' : '添削済み';
+    
+    // 添削回数を計算
+    const reviewCount = isReReview ? existingFiles.length + 1 : 1;
+
     // メタデータを拡張
     const enhancedMetadata = {
       ...cleanedMetadata,
       originalFileName: fileName,
       processedAt: new Date().toISOString(),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      isReReview,
+      reviewCount,
+      previousReviews: isReReview ? existingFiles.map(f => f.id) : []
     };
     
     // デバッグログを追加
@@ -65,6 +98,9 @@ export async function saveResumeFile(
       fileName,
       filePath,
       userName,
+      status,
+      reviewCount,
+      isReReview,
       originalTextLength: originalText ? originalText.length : null,
       correctedTextLength: correctedText ? correctedText.length : null,
       metadata: JSON.stringify(enhancedMetadata).substring(0, 500)
@@ -84,14 +120,14 @@ export async function saveResumeFile(
         : correctedText)
       : null;
     
-    // Supabaseのテーブルにデータを保存
+    // Supabaseのテーブルにデータを保存 - 新しいレコードのみを「再添削」ステータスで作成
     const { data, error } = await supabase
       .from('resume_files')
       .insert([
         {
           title: fileName,
           user_name: userName,
-          status: '添削済み',
+          status: status, // 再添削ステータス（過去のレコードは更新しない）
           file_path: filePath,
           metadata: enhancedMetadata,
           original_text: truncatedOriginalText,
@@ -128,6 +164,8 @@ export async function saveResumeFile(
     console.log('データベース保存成功:', {
       fileId: data?.[0]?.id,
       title: fileName,
+      status,
+      reviewCount,
       originalTextSaved: !!truncatedOriginalText,
       correctedTextSaved: !!truncatedCorrectedText
     });
@@ -136,7 +174,9 @@ export async function saveResumeFile(
       success: true, 
       file_id: data?.[0]?.id,
       file_path: filePath,
-    };
+      status,
+      reviewCount
+    }as UploadResult;
   } catch (error: any) {
     // 予期せぬエラーのハンドリング
     console.error('ファイル情報の保存エラー:', {
@@ -157,7 +197,6 @@ export async function saveResumeFile(
     };
   }
 }
-
 // 他の関数（getAllResumeFiles、getResumeFile等）は前回と同じなので省略
 // ...
 

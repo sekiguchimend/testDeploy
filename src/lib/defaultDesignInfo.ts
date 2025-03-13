@@ -20,17 +20,17 @@ const defaultDesignInfo = {
         textAlign: "left"
       },
       heading2: {
-        fontSize: "17px",
+        fontSize: "15px",
         fontFamily: "'Noto Sans JP', sans-serif",
-        fontWeight: "700",
+        fontWeight: "500",
         color: "#000000",
         lineHeight: "1.4",
         textAlign: "left"
       },
       heading3: {
-        fontSize: "15px",
+        fontSize: "14px",
         fontFamily: "'Noto Sans JP', sans-serif",
-        fontWeight: "600",
+        fontWeight: "500",
         color: "#000000",
         lineHeight: "1.4",
         textAlign: "left"

@@ -233,7 +233,11 @@ const determineElementType = (text: string, index: number, allLines: string[]): 
 
 /**
  * 文書の全体構造を解析し、コンテキストに基づいて要素タイプを最適化する
- * 孤立したリスト項目や、連続する見出しなどを調整する
+ * h1要素は添削後のドキュメント内で必ず1つだけになるよう制御する
+ */
+/**
+ * 文書の全体構造を解析し、コンテキストに基づいて要素タイプを最適化する
+ * h1要素は添削後のドキュメント内で必ず1つだけ（先頭）になるよう制御する
  */
 export const analyzeDocumentStructure = (lines: string[]): ('h1' | 'h2' | 'h3' | 'p' | 'li' | 'blockquote')[] => {
   // 各行の初期要素タイプを判定
@@ -242,12 +246,24 @@ export const analyzeDocumentStructure = (lines: string[]): ('h1' | 'h2' | 'h3' |
   // 最適化されたタイプを格納する配列
   const optimizedTypes = [...initialTypes];
   
-  // 文書構造の最適化ルールを適用
+  // h1を最初の1つだけに制限する明示的な処理
+  let foundFirstH1 = false;
+  for (let i = 0; i < optimizedTypes.length; i++) {
+    if (optimizedTypes[i] === 'h1') {
+      if (!foundFirstH1) {
+        // 最初のh1を見つけた場合はフラグを立てるだけ
+        foundFirstH1 = true;
+      } else {
+        // 2つ目以降のh1は全てh2に変換
+        optimizedTypes[i] = 'h2';
+      }
+    }
+  }
+  
+  // その他の文書構造の最適化ルールを適用
   for (let i = 0; i < lines.length; i++) {
-    // 1. 連続する見出しの調整（同じレベルの見出しが連続する場合、2つ目以降を段落に変更）
-    if (i > 0 && 
-        (optimizedTypes[i] === 'h1' && optimizedTypes[i-1] === 'h1') ||
-        (optimizedTypes[i] === 'h2' && optimizedTypes[i-1] === 'h2')) {
+    // 1. 連続する見出しの調整（同じレベルの見出しが連続する場合、2つ目以降を調整）
+    if (i > 0 && optimizedTypes[i] === 'h2' && optimizedTypes[i-1] === 'h2') {
       // ただし、非常に短い (20文字未満) テキストは見出しのままにする
       if (lines[i].trim().length >= 20) {
         optimizedTypes[i] = 'p';
@@ -278,23 +294,11 @@ export const analyzeDocumentStructure = (lines: string[]): ('h1' | 'h2' | 'h3' |
       }
     }
     
-    // 4. 日付や期間を含む行を見出しまたは強調テキストとして扱う
-    if (optimizedTypes[i] === 'p') {
-      const trimmedText = lines[i].trim();
-      if (/^\d{4}年\d{1,2}月(\d{1,2}日)?/.test(trimmedText) || 
-          /^\d{4}\/\d{1,2}(\/\d{1,2})?/.test(trimmedText) ||
-          /^\d{4}\.\d{1,2}(\.\d{1,2})?/.test(trimmedText)) {
-        // 日付が含まれているが行が長い場合は段落のまま
-        if (trimmedText.length < 40) {
-          optimizedTypes[i] = 'h3';
-        }
-      }
-    }
+    // 日付や期間は特別に強調する処理は削除（クライアント要件）
   }
   
   return optimizedTypes;
 };
-
 /**
  * テキストの各行を解析し、適切な要素タイプを決定して要素オブジェクトに変換する
  */
@@ -842,47 +846,124 @@ tokenDiffs.forEach((part: DiffResult<string>) => {
   };
  
   // リスト項目を適切にグループ化
-  const renderParagraphsWithListGrouping = (paragraphs: ParagraphWithDiff[], isOriginal: boolean) => {
-    const result: JSX.Element[] = [];
-    let currentListItems: ParagraphWithDiff[] = [];
+  /**
+ * リスト項目をより賢くグループ化するための修正版レンダリング関数
+ * 異なる種類のリスト記号を持つ項目を別グループとして扱う
+ */
+const renderParagraphsWithListGrouping = (paragraphs: ParagraphWithDiff[], isOriginal: boolean) => {
+  const result: JSX.Element[] = [];
+  let currentListItems: ParagraphWithDiff[] = [];
+  let currentListType: string | null = null; // リストタイプを追跡
+
+  // リスト項目のタイプを判定する補助関数（記号に基づく）
+  const getListItemType = (text: string): string => {
+    const trimmedText = text.trim();
     
-    // 段落を順に処理し、リスト項目は<ul>でグループ化
-    paragraphs.forEach((paragraph, idx) => {
-      if (paragraph.elementType === 'li') {
-        currentListItems.push(paragraph);
-      } else {
-        // リスト項目が溜まっていれば、<ul>でまとめる
+    // 数字や序数によるリスト
+    if (/^[\d０-９]+[\.)）]\s+/.test(trimmedText)) {
+      return 'ordered';
+    }
+    
+    // 記号によるリスト - 記号ごとに分類
+    if (/^[-]\s+/.test(trimmedText)) return 'dash';
+    if (/^[*]\s+/.test(trimmedText)) return 'asterisk';
+    if (/^[•]\s+/.test(trimmedText)) return 'bullet';
+    if (/^[・]\s+/.test(trimmedText)) return 'jp-bullet';
+    if (/^[※]\s+/.test(trimmedText)) return 'note';
+    if (/^[→]\s+/.test(trimmedText)) return 'arrow';
+    
+    // デフォルトタイプ
+    return 'generic';
+  };
+
+  // 段落を順に処理し、リスト項目は<ul>でグループ化
+  paragraphs.forEach((paragraph, idx) => {
+    if (paragraph.elementType === 'li') {
+      // リスト項目のタイプを判定
+      const itemType = getListItemType(paragraph.text);
+      
+      // 新しいリストの開始または異なるタイプのリスト項目の場合
+      if (currentListItems.length === 0 || currentListType !== itemType) {
+        // 以前のリスト項目があれば、先にそれを処理
         if (currentListItems.length > 0) {
           const { style } = getElementClassAndStyle(currentListItems[0]);
+          
+          // ordererdリストタイプの場合はolタグを使用
+          const ListTag = currentListType === 'ordered' ? 'ol' : 'ul';
+          
           result.push(
-            <ul key={`${isOriginal ? 'original' : 'corrected'}-list-${result.length}`} style={style}>
-              {currentListItems.map((item, itemIdx) => 
+            React.createElement(
+              ListTag,
+              {
+                key: `${isOriginal ? 'original' : 'corrected'}-list-${result.length}`,
+                style
+              },
+              currentListItems.map((item, itemIdx) => 
                 renderParagraphWithAppropriateTag(item, idx - currentListItems.length + itemIdx, isOriginal)
-              )}
-            </ul>
+              )
+            )
           );
           currentListItems = [];
         }
         
-        // 通常の段落を追加
-        result.push(renderParagraphWithAppropriateTag(paragraph, idx, isOriginal));
+        // 新しいリストタイプを設定
+        currentListType = itemType;
       }
-    });
-    
-    // 最後のリスト項目があれば追加
-    if (currentListItems.length > 0) {
-      const { style } = getElementClassAndStyle(currentListItems[0]);
-      result.push(
-        <ul key={`${isOriginal ? 'original' : 'corrected'}-list-${result.length}`} style={style}>
-          {currentListItems.map((item, itemIdx) => 
-            renderParagraphWithAppropriateTag(item, paragraphs.length - currentListItems.length + itemIdx, isOriginal)
-          )}
-        </ul>
-      );
+      
+      // 現在のリスト項目を追加
+      currentListItems.push(paragraph);
+    } else {
+      // リスト項目ではない場合、現在のリスト項目をフラッシュ
+      if (currentListItems.length > 0) {
+        const { style } = getElementClassAndStyle(currentListItems[0]);
+        
+        // ordererdリストタイプの場合はolタグを使用
+        const ListTag = currentListType === 'ordered' ? 'ol' : 'ul';
+        
+        result.push(
+          React.createElement(
+            ListTag,
+            {
+              key: `${isOriginal ? 'original' : 'corrected'}-list-${result.length}`,
+              style
+            },
+            currentListItems.map((item, itemIdx) => 
+              renderParagraphWithAppropriateTag(item, idx - currentListItems.length + itemIdx, isOriginal)
+            )
+          )
+        );
+        currentListItems = [];
+        currentListType = null;
+      }
+      
+      // 通常の段落を追加
+      result.push(renderParagraphWithAppropriateTag(paragraph, idx, isOriginal));
     }
+  });
+  
+  // 最後のリスト項目があれば追加
+  if (currentListItems.length > 0) {
+    const { style } = getElementClassAndStyle(currentListItems[0]);
     
-    return result;
-  };
+    // ordererdリストタイプの場合はolタグを使用
+    const ListTag = currentListType === 'ordered' ? 'ol' : 'ul';
+    
+    result.push(
+      React.createElement(
+        ListTag,
+        {
+          key: `${isOriginal ? 'original' : 'corrected'}-list-${result.length}`,
+          style
+        },
+        currentListItems.map((item, itemIdx) => 
+          renderParagraphWithAppropriateTag(item, paragraphs.length - currentListItems.length + itemIdx, isOriginal)
+        )
+      )
+    );
+  }
+  
+  return result;
+};
 
   // コンポーネントのメインレンダリング
   return (

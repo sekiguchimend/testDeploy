@@ -35,7 +35,7 @@ import {
   Legend,
 } from "recharts";
 import Link from "next/link";
-import {ArrowLeft, Check, X, Edit2, FileText, Download, RefreshCw, Calendar, AlertTriangle, Link as lin} from "lucide-react";
+import {ArrowLeft, Check, X, Edit2, FileText, Download, RefreshCw, Calendar, AlertTriangle, Menu} from "lucide-react";
 import { getAllResumeFiles, getMonthlyStats, getStatusStats } from "@/lib/resumeService";
 import { getAllKeywords, addKeyword, updateKeyword, deleteKeyword } from "@/lib/keywordService";
 import type { ResumeFile, MonthlyStats } from "@/lib/resumeService";
@@ -73,12 +73,32 @@ export default function AdminDashboard() {
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear());
   const [statsLoading, setStatsLoading] = useState(true);
   const [totalUploads, setTotalUploads] = useState(0);
+  
+  // モバイル対応
+  const [isMobileView, setIsMobileView] = useState(false);
+
+  // モバイルメニュー表示状態
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // 画面サイズ検出
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileView(window.innerWidth < 768);
+    };
+    
+    // 初期ロード時にも実行
+    handleResize();
+    
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   // テキスト比較モーダルを開く関数
   const openTextComparisonModal = (resume: ResumeFile) => {
     setSelectedResume(resume);
     setComparisonModalOpen(true);
   };
+  
   // キーワード一覧をSupabaseから取得
   const fetchKeywords = async () => {
     if (keywordsLoading && !keywords.length) {
@@ -120,7 +140,6 @@ export default function AdminDashboard() {
   // 添削済みファイルをSupabaseから取得
   const fetchResumeFiles = async () => {
     if (loading && !resumes.length) {
-      // 最初のロード時はステータスを表示
       console.log('ファイル一覧取得を開始...');
     } else {
       setLoading(true);
@@ -140,7 +159,7 @@ export default function AdminDashboard() {
       
       if (result.data && Array.isArray(result.data)) {
         setResumes(result.data);
-        setTotalUploads(result.data.length); // 総アップロード数を更新
+        setTotalUploads(result.data.length); 
       } else {
         console.warn('レスポンスには有効なデータ配列がありません:', result);
         setResumes([]);
@@ -164,7 +183,6 @@ export default function AdminDashboard() {
   // 統計データを取得
   const fetchStats = async (year: number = selectedYear) => {
     if (statsLoading && !monthlyStats.length) {
-      // 最初のロード時はステータスを表示
       console.log('統計データ取得を開始...');
     } else {
       setStatsLoading(true);
@@ -178,7 +196,6 @@ export default function AdminDashboard() {
       console.log('月間統計取得結果:', {
         成功: monthlyResult.success,
         データ数: monthlyResult.data?.length || 0,
-       
       });
       
       if (monthlyResult.data && Array.isArray(monthlyResult.data)) {
@@ -397,38 +414,239 @@ export default function AdminDashboard() {
     const year = new Date().getFullYear() - i;
     return { value: year, label: `${year}年` };
   });
+  
+  // レスポンシブスタイルの調整
+  const getChartHeight = () => {
+    return isMobileView ? 220 : 300;
+  };
+  
+  // モバイル用テーブルレンダリング
+  const renderMobileResumeList = () => {
+    if (loading) {
+      return (
+        <div className="flex justify-center items-center py-8">
+          <RefreshCw className="h-5 w-5 animate-spin mr-2 text-gray-500" />
+          <span>データを読み込み中...</span>
+        </div>
+      );
+    }
+    
+    if (resumes.length === 0) {
+      return (
+        <div className="text-center py-8 text-gray-500">
+          保存されたファイルがありません
+        </div>
+      );
+    }
+    
+    return (
+      <div className="space-y-4">
+        {resumes.map((resume) => (
+          <Card key={resume.id} className="p-4 border-gray-200">
+            <div className="flex items-start justify-between mb-2">
+              <div className="flex items-center gap-2 w-4/5">
+                <FileText className="h-4 w-4 flex-shrink-0 text-blue-500 mt-1" />
+                <h3 className="font-medium line-clamp-2 break-words">{resume.title || '名称なし'}</h3>
+              </div>
+              <span className={`px-2 py-1 rounded-full text-xs ${
+                resume.status === "添削済み" 
+                  ? "bg-green-100 text-green-800"
+                  : "bg-yellow-100 text-yellow-800"
+              }`}>
+                {resume.status || '未分類'}
+              </span>
+            </div>
+            <div className="text-sm text-gray-600 space-y-1.5">
+              <div className="flex justify-between">
+                <span>アップロード:</span>
+                <span className="font-medium">{formatDate(resume.uploaded_at)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>ユーザー:</span>
+                <span className="font-medium truncate max-w-[150px]">{resume.user_name || 'ゲストユーザー'}</span>
+              </div>
+            </div>
+            <div className="mt-3 flex justify-end">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => openTextComparisonModal(resume)}
+                className="text-blue-600"
+              >
+                <Edit2 className="h-4 w-4 mr-1" />
+                テキスト比較
+              </Button>
+            </div>
+          </Card>
+        ))}
+      </div>
+    );
+  };
+  
+  // モバイル用キーワードリストレンダリング
+  const renderMobileKeywordList = () => {
+    if (keywordsLoading) {
+      return (
+        <div className="flex justify-center items-center py-8">
+          <RefreshCw className="h-5 w-5 animate-spin mr-2 text-gray-500" />
+          <span>データを読み込み中...</span>
+        </div>
+      );
+    }
+    
+    if (keywords.length === 0) {
+      return (
+        <div className="text-center py-8 text-gray-500">
+          登録されたキーワードがありません
+        </div>
+      );
+    }
+    
+    return (
+      <div className="space-y-3 mt-6">
+        {keywords.map((item) => (
+          <Card key={item.id} className="p-3 border-gray-200">
+            {editingKeyword.id === item.id ? (
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">キーワード</label>
+                  <Input
+                    value={editingKeyword.keyword}
+                    onChange={(e) =>
+                      setEditingKeyword({
+                        ...editingKeyword,
+                        keyword: e.target.value,
+                      })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">アクション</label>
+                  <Select
+                    value={editingKeyword.action}
+                    onValueChange={(value) =>
+                      setEditingKeyword({
+                        ...editingKeyword,
+                        action: value,
+                      })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="アクションを選択" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="添削対象外">添削対象外</SelectItem>
+                      <SelectItem value="要確認">要確認</SelectItem>
+                      <SelectItem value="警告表示">警告表示</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex justify-end gap-2 mt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => saveEdit(item.id)}
+                    className="text-green-600"
+                  >
+                    <Check className="h-4 w-4 mr-1" />
+                    保存
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={cancelEdit}
+                    className="text-red-600"
+                  >
+                    <X className="h-4 w-4 mr-1" />
+                    キャンセル
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex justify-between items-center mb-2">
+                  <h3 className="font-medium">{item.keyword}</h3>
+                  <span className={`px-2 py-1 rounded-full text-xs ${
+                    item.action === "添削対象外" 
+                      ? "bg-red-100 text-red-800"
+                      : item.action === "要確認"
+                      ? "bg-yellow-100 text-yellow-800"
+                      : "bg-blue-100 text-blue-800"
+                  }`}>
+                    {item.action}
+                  </span>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => startEditing(item)}
+                    className="text-gray-600"
+                  >
+                    <Edit2 className="h-4 w-4 mr-1" />
+                    編集
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => deleteKeywordItem(item.id)}
+                    className="text-red-500"
+                  >
+                    削除
+                  </Button>
+                </div>
+              </>
+            )}
+          </Card>
+        ))}
+      </div>
+    );
+  };
 
   return (
-    <div className="container mx-auto p-6 space-y-8 animate-fadeIn bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen">
-      <div className="flex justify-between items-center mb-8">
-      <Link href="./">
-        <ArrowLeft />
-        </Link>
-        <h1 className="text-3xl font-bold tracking-tight text-gray-900">
-          管理ダッシュボード
-        </h1>
+    <div className="mx-auto p-4 md:p-6 space-y-6 animate-fadeIn bg-gradient-to-br from-gray-50 to-gray-100 min-h-screen">
+      <div className="flex justify-between items-center mb-6">
+        <div className="flex items-center">
+          <Link href="./" className="mr-3">
+            <Button variant="ghost" size="icon" className="h-9 w-9">
+              <ArrowLeft className="h-5 w-5" />
+            </Button>
+          </Link>
+          <h1 className="text-xl md:text-3xl font-bold tracking-tight text-gray-900">
+            管理ダッシュボード
+          </h1>
+        </div>
         
         <Button
           variant="outline"
-          className="hover:bg-gray-100 transition-colors"
+          className="hover:bg-gray-100 transition-colors hidden md:flex"
           onClick={refreshAllData}
         >
           <RefreshCw className="mr-2 h-4 w-4" />
           すべて更新
         </Button>
+        
+        <Button
+          variant="outline"
+          size="icon"
+          className="md:hidden h-9 w-9"
+          onClick={refreshAllData}
+        >
+          <RefreshCw className="h-5 w-5" />
+        </Button>
       </div>
 
       <Tabs defaultValue="resumes" className="space-y-6">
-        <TabsList className="inline-flex h-12 items-center justify-center rounded-lg bg-gray-100 p-1 text-gray-500 mb-4">
-          <TabsTrigger value="resumes">職務経歴書一覧</TabsTrigger>
-          <TabsTrigger value="keywords">キーワード管理</TabsTrigger>
-          <TabsTrigger value="analytics">分析</TabsTrigger>
+        <TabsList className="w-full h-auto flex md:inline-flex md:h-12 md:w-auto items-center justify-center rounded-lg bg-gray-100 p-1 text-gray-500 mb-4 overflow-x-auto">
+          <TabsTrigger value="resumes" className="flex-1 md:flex-none py-2">職務経歴書一覧</TabsTrigger>
+          <TabsTrigger value="keywords" className="flex-1 md:flex-none py-2">キーワード管理</TabsTrigger>
+          <TabsTrigger value="analytics" className="flex-1 md:flex-none py-2">分析</TabsTrigger>
         </TabsList>
 
         <TabsContent value="resumes" className="space-y-4">
-          <Card className="p-6 shadow-lg bg-white/80 backdrop-blur-sm">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-semibold text-gray-900">
+          <Card className="p-4 md:p-6 shadow-lg bg-white/80 backdrop-blur-sm">
+            <div className="flex justify-between items-center mb-4 md:mb-6">
+              <h2 className="text-lg md:text-xl font-semibold text-gray-900">
                 アップロード済み職務経歴書 ({resumes.length}件)
               </h2>
               <Button
@@ -438,18 +656,19 @@ export default function AdminDashboard() {
                 className="text-gray-600 hover:text-gray-900"
                 disabled={loading}
               >
-                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                更新する
+                <RefreshCw className={`h-4 w-4 mr-1 md:mr-2 ${loading ? 'animate-spin' : ''}`} />
+                <span className="hidden md:inline">更新する</span>
               </Button>
             </div>
             
             {error && (
-              <div className="mb-4 p-3 bg-red-100 text-red-800 rounded-md">
+              <div className="mb-4 p-3 bg-red-100 text-red-800 rounded-md text-sm md:text-base">
                 エラー: {error}
               </div>
             )}
             
-            <div className="overflow-x-auto">
+            {/* デスクトップ表示のテーブル */}
+            <div className="hidden md:block overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -496,57 +715,35 @@ export default function AdminDashboard() {
                         </TableCell>
                         <TableCell>{formatDate(resume.uploaded_at)}</TableCell>
                         <TableCell className="truncate max-w-[150px]">{resume.user_name || 'ゲストユーザー'}</TableCell>
-                        {/* <TableCell className="text-right">
+                        <TableCell className="text-right">
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => handleDownload(resume.file_path, resume.title)}
+                            onClick={() => openTextComparisonModal(resume)}
                             className="hover:bg-blue-50 text-blue-600"
                           >
-                            <Download className="h-4 w-4 mr-1" />
-                            ダウンロード
+                            <Edit2 className="h-4 w-4 mr-1" />
+                            テキスト比較
                           </Button>
-                        </TableCell> */}
-                        <TableCell className="text-right">
-  <Button
-    variant="ghost"
-    size="sm"
-    onClick={() => openTextComparisonModal(resume)}
-    className="hover:bg-blue-50 text-blue-600"
-  >
-    <Edit2 className="h-4 w-4 mr-1" />
-    テキスト比較
-  </Button>
-</TableCell>
-                        {selectedResume && (
-  <TextComparisonModal
-    originalText={selectedResume.original_text || ''}
-    correctedText={selectedResume.corrected_text || ''}
-    fileName={selectedResume.title || ''}
-    isOpen={comparisonModalOpen}
-    onOpenChange={(open) => {
-      setComparisonModalOpen(open);
-      if (!open) {
-        setSelectedResume(null);
-      }
-    }}
-  />
-)}
-                        
+                          </TableCell>
                       </TableRow>
-                       
                     ))
                   )}
                 </TableBody>
               </Table>
             </div>
+            
+            {/* モバイル表示のカードリスト */}
+            <div className="md:hidden">
+              {renderMobileResumeList()}
+            </div>
           </Card>
         </TabsContent>
 
         <TabsContent value="keywords">
-          <Card className="p-6 shadow-lg bg-white/80 backdrop-blur-sm">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-xl font-semibold text-gray-900">
+          <Card className="p-4 md:p-6 shadow-lg bg-white/80 backdrop-blur-sm">
+            <div className="flex justify-between items-center mb-4 md:mb-6">
+              <h2 className="text-lg md:text-xl font-semibold text-gray-900">
                 キーワード設定
               </h2>
               <Button
@@ -556,20 +753,21 @@ export default function AdminDashboard() {
                 className="text-gray-600 hover:text-gray-900"
                 disabled={keywordsLoading}
               >
-                <RefreshCw className={`h-4 w-4 mr-2 ${keywordsLoading ? 'animate-spin' : ''}`} />
-                更新する
+                <RefreshCw className={`h-4 w-4 mr-1 md:mr-2 ${keywordsLoading ? 'animate-spin' : ''}`} />
+                <span className="hidden md:inline">更新する</span>
               </Button>
             </div>
             
-            <Alert className="mb-6 bg-amber-50 border-amber-200">
-              <AlertTriangle className="h-5 w-5 text-amber-600" />
-              <AlertDescription className="ml-2">
+            <Alert className="mb-4 md:mb-6 bg-amber-50 border-amber-200">
+              <AlertTriangle className="h-4 md:h-5 w-4 md:w-5 text-amber-600" />
+              <AlertDescription className="ml-2 text-xs md:text-sm">
                 ここで設定したキーワードは添削プロセス中に検出され、「添削対象外」に設定したキーワードはAIプロンプトに含まれなくなります。
               </AlertDescription>
             </Alert>
             
-            <div className="space-y-6">
-              <div className="flex gap-4 items-end">
+            <div className="space-y-4 md:space-y-6">
+              {/* キーワード追加フォーム - モバイル対応 */}
+              <div className={`${isMobileView ? 'flex flex-col space-y-3' : 'flex gap-4 items-end'}`}>
                 <div className="space-y-2 flex-1">
                   <label htmlFor="newKeyword" className="text-sm font-medium">
                     キーワード
@@ -582,7 +780,7 @@ export default function AdminDashboard() {
                     onChange={(e) => setNewKeyword(e.target.value)}
                   />
                 </div>
-                <div className="space-y-2">
+                <div className={`space-y-2 ${isMobileView ? 'w-full' : ''}`}>
                   <label htmlFor="newAction" className="text-sm font-medium">
                     アクション
                   </label>
@@ -590,7 +788,7 @@ export default function AdminDashboard() {
                     value={newAction} 
                     onValueChange={setNewAction}
                   >
-                    <SelectTrigger id="newAction" className="w-[150px]">
+                    <SelectTrigger id="newAction" className={`${isMobileView ? 'w-full' : 'w-[150px]'}`}>
                       <SelectValue placeholder="アクションを選択" />
                     </SelectTrigger>
                     <SelectContent>
@@ -602,14 +800,15 @@ export default function AdminDashboard() {
                 </div>
                 <Button
                   onClick={handleAddKeyword}
-                  className="bg-blue-600 hover:bg-blue-700 text-white transition-colors"
+                  className={`bg-blue-600 hover:bg-blue-700 text-white transition-colors ${isMobileView ? 'w-full mt-2' : ''}`}
                   disabled={keywordsLoading}
                 >
                   追加
                 </Button>
               </div>
 
-              <div className="relative">
+              {/* デスクトップ表示のテーブル */}
+              <div className="relative hidden md:block">
                 {keywordsLoading && (
                   <div className="absolute inset-0 bg-white/70 z-10 flex items-center justify-center">
                     <RefreshCw className="h-10 w-10 animate-spin text-blue-500" />
@@ -730,16 +929,21 @@ export default function AdminDashboard() {
                   </TableBody>
                 </Table>
               </div>
+              
+              {/* モバイル表示のカードリスト */}
+              <div className="md:hidden">
+                {renderMobileKeywordList()}
+              </div>
             </div>
           </Card>
         </TabsContent>
 
         <TabsContent value="analytics">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
             {/* 月間アップロード統計 */}
-            <Card className="p-6 shadow-lg bg-white/80 backdrop-blur-sm">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-semibold text-gray-900">
+            <Card className="p-4 md:p-6 shadow-lg bg-white/80 backdrop-blur-sm">
+              <div className="flex flex-col md:flex-row md:justify-between md:items-center mb-4 md:mb-6 space-y-3 md:space-y-0">
+                <h2 className="text-lg md:text-xl font-semibold text-gray-900">
                   月間アップロード推移
                 </h2>
                 <div className="flex items-center gap-2">
@@ -747,7 +951,7 @@ export default function AdminDashboard() {
                     value={selectedYear.toString()}
                     onValueChange={(value) => setSelectedYear(parseInt(value))}
                   >
-                    <SelectTrigger className="w-[120px]">
+                    <SelectTrigger className={`${isMobileView ? 'flex-1' : 'w-[120px]'}`}>
                       <Calendar className="h-4 w-4 mr-2" />
                       <SelectValue placeholder="年を選択" />
                     </SelectTrigger>
@@ -766,15 +970,15 @@ export default function AdminDashboard() {
                     className="text-gray-600 hover:text-gray-900"
                     disabled={statsLoading}
                   >
-                    <RefreshCw className={`h-4 w-4 mr-2 ${statsLoading ? 'animate-spin' : ''}`} />
-                    更新
+                    <RefreshCw className={`h-4 w-4 mr-1 md:mr-2 ${statsLoading ? 'animate-spin' : ''}`} />
+                    <span className="hidden md:inline">更新</span>
                   </Button>
                 </div>
               </div>
-              <div className="h-[300px]">
+              <div className={`h-[${getChartHeight()}px]`}>
                 {statsLoading ? (
                   <div className="h-full flex items-center justify-center">
-                    <RefreshCw className="h-10 w-10 animate-spin text-gray-400" />
+                    <RefreshCw className="h-8 w-8 md:h-10 md:w-10 animate-spin text-gray-400" />
                   </div>
                 ) : monthlyStats.length === 0 ? (
                   <div className="h-full flex items-center justify-center text-gray-500">
@@ -784,8 +988,17 @@ export default function AdminDashboard() {
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={monthlyStats}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="month" stroke="#6b7280" tick={{ fill: '#6b7280' }} />
-                      <YAxis stroke="#6b7280" tick={{ fill: '#6b7280' }} />
+                      <XAxis 
+                        dataKey="month" 
+                        stroke="#6b7280" 
+                        tick={{ fill: '#6b7280', fontSize: isMobileView ? 10 : 12 }}
+                        tickMargin={isMobileView ? 5 : 10}
+                      />
+                      <YAxis 
+                        stroke="#6b7280" 
+                        tick={{ fill: '#6b7280', fontSize: isMobileView ? 10 : 12 }}
+                        width={isMobileView ? 25 : 40}
+                      />
                       <Tooltip 
                         contentStyle={{ backgroundColor: 'white', borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', border: 'none' }}
                         formatter={(value) => [`${value}件`, 'アップロード数']}
@@ -796,6 +1009,7 @@ export default function AdminDashboard() {
                         fill="#3b82f6" 
                         radius={[4, 4, 0, 0]} 
                         animationDuration={1000}
+                        barSize={isMobileView ? 15 : 20}
                       />
                     </BarChart>
                   </ResponsiveContainer>
@@ -804,16 +1018,16 @@ export default function AdminDashboard() {
             </Card>
             
             {/* ステータス別グラフ */}
-            <Card className="p-6 shadow-lg bg-white/80 backdrop-blur-sm">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-xl font-semibold text-gray-900">
+            <Card className="p-4 md:p-6 shadow-lg bg-white/80 backdrop-blur-sm">
+              <div className="flex justify-between items-center mb-4 md:mb-6">
+                <h2 className="text-lg md:text-xl font-semibold text-gray-900">
                   ステータス別割合
                 </h2>
               </div>
-              <div className="h-[300px]">
+              <div className={`h-[${getChartHeight()}px]`}>
                 {statsLoading ? (
                   <div className="h-full flex items-center justify-center">
-                    <RefreshCw className="h-10 w-10 animate-spin text-gray-400" />
+                    <RefreshCw className="h-8 w-8 md:h-10 md:w-10 animate-spin text-gray-400" />
                   </div>
                 ) : statusChartData.length === 0 ? (
                   <div className="h-full flex items-center justify-center text-gray-500">
@@ -828,9 +1042,10 @@ export default function AdminDashboard() {
                         nameKey="name"
                         cx="50%"
                         cy="50%"
-                        outerRadius={100}
+                        outerRadius={isMobileView ? 70 : 100}
                         fill="#8884d8"
-                        label={({name, percent}) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                        label={isMobileView ? undefined : ({name, percent}) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                        labelLine={!isMobileView}
                         animationDuration={1000}
                       >
                         {statusChartData.map((entry, index) => (
@@ -841,7 +1056,7 @@ export default function AdminDashboard() {
                         formatter={(value) => [`${value}件`, '']}
                         contentStyle={{ backgroundColor: 'white', borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', border: 'none' }}
                       />
-                      <Legend />
+                      <Legend layout={isMobileView ? "horizontal" : "vertical"} verticalAlign={isMobileView ? "bottom" : "middle"} align={isMobileView ? "center" : "right"} />
                     </PieChart>
                   </ResponsiveContainer>
                 )}
@@ -850,39 +1065,38 @@ export default function AdminDashboard() {
           </div>
           
           {/* 総合統計 */}
-          <Card className="p-6 shadow-lg bg-white/80 backdrop-blur-sm mt-6">
-            <h2 className="text-xl font-semibold mb-6 text-gray-900">
+          <Card className="p-4 md:p-6 shadow-lg bg-white/80 backdrop-blur-sm mt-4 md:mt-6">
+            <h2 className="text-lg md:text-xl font-semibold mb-4 md:mb-6 text-gray-900">
               総合統計
             </h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-blue-50 rounded-lg p-4 shadow-sm border border-blue-100">
-                <h3 className="text-sm text-blue-600 font-medium mb-2">総アップロード数</h3>
-                <p className="text-3xl font-bold text-blue-700">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
+              <div className="bg-blue-50 rounded-lg p-3 md:p-4 shadow-sm border border-blue-100">
+                <h3 className="text-xs md:text-sm text-blue-600 font-medium mb-1 md:mb-2">総アップロード数</h3>
+                <p className="text-2xl md:text-3xl font-bold text-blue-700">
                   {statsLoading ? (
-                    <RefreshCw className="h-6 w-6 animate-spin text-blue-400" />
+                    <RefreshCw className="h-5 w-5 md:h-6 md:w-6 animate-spin text-blue-400" />
                   ) : (
-                    // ファイル一覧のカウントを使用 - 問題修正
                     resumes.length
                   )}
                 </p>
               </div>
               
-              <div className="bg-green-50 rounded-lg p-4 shadow-sm border border-green-100">
-                <h3 className="text-sm text-green-600 font-medium mb-2">添削済みファイル</h3>
-                <p className="text-3xl font-bold text-green-700">
+              <div className="bg-green-50 rounded-lg p-3 md:p-4 shadow-sm border border-green-100">
+                <h3 className="text-xs md:text-sm text-green-600 font-medium mb-1 md:mb-2">添削済みファイル</h3>
+                <p className="text-2xl md:text-3xl font-bold text-green-700">
                   {statsLoading ? (
-                    <RefreshCw className="h-6 w-6 animate-spin text-green-400" />
+                    <RefreshCw className="h-5 w-5 md:h-6 md:w-6 animate-spin text-green-400" />
                   ) : (
                     statusStats['添削済み'] || 0
                   )}
                 </p>
               </div>
               
-              <div className="bg-amber-50 rounded-lg p-4 shadow-sm border border-amber-100">
-                <h3 className="text-sm text-amber-600 font-medium mb-2">{selectedYear}年合計</h3>
-                <p className="text-3xl font-bold text-amber-700">
+              <div className="bg-amber-50 rounded-lg p-3 md:p-4 shadow-sm border border-amber-100">
+                <h3 className="text-xs md:text-sm text-amber-600 font-medium mb-1 md:mb-2">{selectedYear}年合計</h3>
+                <p className="text-2xl md:text-3xl font-bold text-amber-700">
                   {statsLoading ? (
-                    <RefreshCw className="h-6 w-6 animate-spin text-amber-400" />
+                    <RefreshCw className="h-5 w-5 md:h-6 md:w-6 animate-spin text-amber-400" />
                   ) : (
                     monthlyStats.reduce((sum, item) => sum + item.uploads, 0)
                   )}
@@ -890,12 +1104,12 @@ export default function AdminDashboard() {
               </div>
             </div>
             
-            <div className="mt-8">
-              <h3 className="text-lg font-medium mb-4 text-gray-800">アップロード傾向分析</h3>
-              <div className="h-[400px]">
+            <div className="mt-5 md:mt-8">
+              <h3 className="text-base md:text-lg font-medium mb-3 md:mb-4 text-gray-800">アップロード傾向分析</h3>
+              <div className="h-[250px] md:h-[400px]">
                 {statsLoading ? (
                   <div className="h-full flex items-center justify-center">
-                    <RefreshCw className="h-10 w-10 animate-spin text-gray-400" />
+                    <RefreshCw className="h-8 w-8 md:h-10 md:w-10 animate-spin text-gray-400" />
                   </div>
                 ) : monthlyStats.length === 0 ? (
                   <div className="h-full flex items-center justify-center text-gray-500">
@@ -905,8 +1119,17 @@ export default function AdminDashboard() {
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={monthlyStats}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                      <XAxis dataKey="month" stroke="#6b7280" tick={{ fill: '#6b7280' }} />
-                      <YAxis stroke="#6b7280" tick={{ fill: '#6b7280' }} />
+                      <XAxis 
+                        dataKey="month" 
+                        stroke="#6b7280" 
+                        tick={{ fill: '#6b7280', fontSize: isMobileView ? 10 : 12 }}
+                        tickMargin={isMobileView ? 5 : 10}
+                      />
+                      <YAxis 
+                        stroke="#6b7280" 
+                        tick={{ fill: '#6b7280', fontSize: isMobileView ? 10 : 12 }} 
+                        width={isMobileView ? 25 : 40}
+                      />
                       <Tooltip 
                         contentStyle={{ backgroundColor: 'white', borderRadius: '8px', boxShadow: '0 4px 6px rgba(0,0,0,0.1)', border: 'none' }}
                         formatter={(value) => [`${value}件`, 'アップロード数']}
@@ -916,8 +1139,8 @@ export default function AdminDashboard() {
                         dataKey="uploads" 
                         stroke="#3b82f6" 
                         strokeWidth={2}
-                        dot={{ r: 4, fill: '#3b82f6' }}
-                        activeDot={{ r: 6 }}
+                        dot={{ r: isMobileView ? 3 : 4, fill: '#3b82f6' }}
+                        activeDot={{ r: isMobileView ? 5 : 6 }}
                         animationDuration={1500}
                       />
                     </LineChart>
@@ -928,6 +1151,22 @@ export default function AdminDashboard() {
           </Card>
         </TabsContent>
       </Tabs>
+      
+      {/* テキスト比較モーダル */}
+      {selectedResume && (
+        <TextComparisonModal
+          originalText={selectedResume.original_text || ''}
+          correctedText={selectedResume.corrected_text || ''}
+          fileName={selectedResume.title || ''}
+          isOpen={comparisonModalOpen}
+          onOpenChange={(open) => {
+            setComparisonModalOpen(open);
+            if (!open) {
+              setSelectedResume(null);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
