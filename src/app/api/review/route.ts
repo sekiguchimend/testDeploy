@@ -364,8 +364,8 @@ export async function POST(req: NextRequest) {
     if (pdfFilePath) {
       response.pdfDownloadUrl = `/api/download?file=${encodeURIComponent(path.basename(pdfFilePath))}&type=pdf`;
     }
-      
-      console.log(recommendationText)
+      console.log(correctedText)
+      // console.log(recommendationText)
         // 処理時間のログ
     const endTime = Date.now();
     console.log(`添削プロセス完了 - 総処理時間: ${(endTime - startTime) / 1000}秒`);

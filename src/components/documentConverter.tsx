@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Document, Packer, Paragraph, HeadingLevel, TextRun, AlignmentType, BorderStyle, Spacing, TableCell, TableRow, Table } from 'docx';
 import { DesignInfo } from '@/types/page';
-
 // 変換オプションのインターフェース
 interface ConversionOptions {
   format: 'pdf' | 'docx' | 'txt' | 'html' | 'markdown';
@@ -102,11 +101,20 @@ export async function convertCorrectedDocumentToFile(
     const newTextNode = document.createTextNode(textContent);
     el.parentNode?.replaceChild(newTextNode, el);
   });
-
+  
+  // 移動された段落の装飾も削除
+  cleanedElement.querySelectorAll('.paragraph-moved').forEach(el => {
+    // paragraph-movedクラスを削除
+    el.classList.remove('paragraph-moved');
+    // 青い線のスタイルをリセット
+    (el as HTMLElement).style.borderLeft = 'none';
+    (el as HTMLElement).style.paddingLeft = '0';
+  });
+  
   // デバッグログ
   console.debug('処理後のHTML:', cleanedElement.innerHTML);
   console.debug('処理後のテキスト:', cleanedElement.textContent);
-
+  
   // 計算済みスタイルを取得して保存（スタイル保持が有効な場合）
   let elementStyles: Map<HTMLElement, any> = new Map();
   if (preserveStyles) {
@@ -686,7 +694,6 @@ function extractParagraphStructureForTxt(element: HTMLElement): Array<{type: str
                 text: '-'.repeat(headers.join('\t').length)
               });
             }
-            
             // 各行を処理
             rows.forEach(row => {
               if (row.querySelectorAll('td').length > 0) {
