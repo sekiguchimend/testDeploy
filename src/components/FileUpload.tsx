@@ -98,13 +98,14 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileProcessed }) => {
   const supportedFileTypes: FileTypeConfig[] = [
     {
       type: 'document',
-      extensions: ['.pdf', '.doc', '.docx', '.txt', '.rtf'],
+      extensions: ['.pdf', '.doc', '.docx', '.txt', '.rtf','pages'],
       mimeTypes: [
         'application/pdf',
         'application/msword',
         'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'text/plain',
-        'application/rtf'
+        'application/rtf',
+        'application/vnd.apple.pages'
       ],
       icon: <FileText className="w-6 h-6" />,
       label: '文書'

@@ -7,7 +7,8 @@ const pdfParse = require('pdf-parse')
 import mammoth from 'mammoth';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-
+import yauzl from "yauzl"
+// const yauzl = require("yauzl")
 const execAsync = promisify(exec);
 
 // 環境変数からAPIキーを取得
@@ -87,6 +88,7 @@ interface ProcessedFile {
   fileType: string;
   designInfo?: DesignInfo;
 }
+
 /**
  * Gemini APIのレスポンスをパースする関数
  * マークダウンのコードブロックも処理可能
@@ -208,7 +210,6 @@ export function formatDesignInfo(designInfo: DesignInfo | undefined): string {
   // 結合して返す
   return `${fontsStr}\n${layoutStr}\n${stylesStr}\n${cssRulesStr}`;
 }
-
 /**
  * テキストファイルを読み込む
  */
@@ -225,7 +226,6 @@ export async function readPdfFile(filePath: string): Promise<string> {
   return data.text;
 }
 
-
 /**
  * Wordファイルを読み込んでテキストを抽出
  */
@@ -233,6 +233,98 @@ export async function readWordFile(filePath: string): Promise<string> {
   const fileBuffer = fs.readFileSync(filePath);
   const result = await mammoth.extractRawText({ buffer: fileBuffer });
   return result.value;
+}
+
+/**
+ * Pagesファイルからテキストを抽出する（シンプル版）
+ * テキスト抽出のみに特化し、レイアウトや書式は保持しない
+ */
+export async function readPagesFile(filePath: string): Promise<string> {
+  try {
+    console.log(`Pagesファイルからテキストを抽出: ${filePath}`);
+    
+    // Zipファイルを開く
+    const openZipFile = promisify<string, yauzl.Options, yauzl.ZipFile>((path, options, cb) => {
+      yauzl.open(path, options, cb);
+    });
+    
+    const zipFile = await openZipFile(filePath, { lazyEntries: true });
+    
+    // テキストを格納する配列
+    let textChunks: string[] = [];
+    
+    // Zipファイルから各エントリを読み込むためのプロミス
+    const readEntryPromise = () => new Promise<void>((resolve, reject) => {
+      zipFile.readEntry();
+      
+      // エントリがない場合は終了
+      zipFile.on('end', () => resolve());
+      zipFile.on('error', (err:any) => reject(err));
+      
+      // 各エントリを処理
+      zipFile.on('entry', (entry:any) => {
+        // ディレクトリは無視
+        if (/\/$/.test(entry.fileName)) {
+          zipFile.readEntry();
+          return;
+        }
+        
+        // XMLファイルまたはテキストファイルのみ収集
+        if (entry.fileName.endsWith('.xml') || entry.fileName.endsWith('.txt')) {
+          // ファイルを開く
+          zipFile.openReadStream(entry, (err:any, stream:any) => {
+            if (err) {
+              zipFile.readEntry();
+              return;
+            }
+            
+            // ファイルの内容を読み込む
+            const chunks: Buffer[] = [];
+            stream.on('data', (chunk:any) => chunks.push(Buffer.from(chunk)));
+            stream.on('end', () => {
+              const content = Buffer.concat(chunks).toString('utf8');
+              
+              // シンプルな正規表現でXMLタグを削除し、テキストのみを抽出
+              const plainText = content
+                .replace(/<[^>]*>/g, ' ')  // XMLタグを空白に置換
+                .replace(/\s+/g, ' ')      // 複数の空白を1つにまとめる
+                .trim();
+              
+              if (plainText.length > 0) {
+                textChunks.push(plainText);
+              }
+              
+              zipFile.readEntry();
+            });
+            
+            stream.on('error', (err:any) => {
+              console.warn(`ストリーム読み込みエラー (${entry.fileName}):`, err);
+              zipFile.readEntry();
+            });
+          });
+        } else {
+          // 対象外のファイルは無視
+          zipFile.readEntry();
+        }
+      });
+    });
+    
+    // Zipファイルの読み込みを開始
+    await readEntryPromise();
+    
+    // 抽出されたテキストをすべて結合
+    const extractedText = textChunks.join('\n\n').trim();
+    
+    if (!extractedText || extractedText.length === 0) {
+      throw new Error('Pagesファイルからテキストを抽出できませんでした');
+    }
+    
+    console.log(`テキスト抽出完了: ${extractedText.length}文字`);
+    return extractedText;
+  } catch (error) {
+    console.error('Pagesファイルの処理中にエラーが発生:', error);
+    throw new Error(`Pagesファイルからのテキスト抽出に失敗しました: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 /**
@@ -251,11 +343,51 @@ export function generateCssFromRules(cssRules: Array<{selector: string; properti
     return `${rule.selector} {\n${propertiesText}\n}`;
   }).join('\n\n');
 }
-/**
- * Gemini APIを使用してテキストの添削とデザイン情報の抽出を行う
- */
 
- /**
+/**
+ * ファイルからテキストを抽出する
+ */
+export async function extractTextFromFile(filePath: string): Promise<{
+  text: string;
+  fileType: string;
+}> {
+  try {
+    const fileExt = path.extname(filePath).toLowerCase();
+    let text = '';
+    let fileType = '';
+
+    if (fileExt === '.txt') {
+      fileType = 'テキスト';
+      text = await readTextFile(filePath);
+    } else if (fileExt === '.pdf') {
+      fileType = 'PDF';
+      text = await readPdfFile(filePath);
+    } else if (fileExt === '.docx' || fileExt === '.doc') {
+      fileType = 'Word';
+      text = await readWordFile(filePath);
+    } else if (fileExt === '.odt') {
+      fileType = 'ODT';
+      text = await readWordFile(filePath);
+    } else if (fileExt === '.pages') {
+      fileType = 'Pages';
+      // シンプルなPagesファイル読み込み関数を使用
+      text = await readPagesFile(filePath);
+    } else {
+      throw new Error(`サポートされていないファイル形式です: ${fileExt}`);
+    }
+
+    if (!text || text.trim() === '') {
+      throw new Error('ファイルからテキストを抽出できませんでした');
+    }
+
+    return { text, fileType };
+  } catch (error) {
+    throw error instanceof Error
+      ? error
+      : new Error("テキスト抽出中に不明なエラーが発生しました");
+  }
+}
+/**
  * Gemini APIを使用してテキストの添削とデザイン情報の抽出を行う
  * プロンプト構造を改善して、h1が消失する問題を解決
  */
@@ -353,11 +485,17 @@ export async function processWithGemini(
 あなたは優秀な転職エージェントです。以下の職務経歴書から、採用を行っている人事に向けて推薦文を作成してください。推薦ポイントを3つにまとめてください。
 なるべく具体的に内容を長めにしてほしい。
 推薦書のフォーマットは必ず下記の通りにしてください：
-コピー■求職者概要
-・（求職者の特徴を箇条書きで1つ目）
-・（求職者の特徴を箇条書きで2つ目）
-・（求職者の特徴を箇条書きで3つ目）
-
+コピー
+■求職者概要
+※以下の項目については、該当する情報が職務経歴書に含まれている場合のみ表示してください。情報がない項目は完全に省略してください。
+・（求職者の現年収。情報がない場合は省略）
+・（求職者の最低希望年収。情報がない場合は省略）
+・（求職者の希望年収。情報がない場合は省略）
+・（求職者の勤務地。情報がない場合は省略）
+・（求職者の入社希望時期。情報がない場合は省略）
+・（求職者の年齢。情報がない場合は省略）
+・（求職者の性別。情報がない場合は省略）
+・（求職者の学歴。情報がない場合は省略）
 ◎ （推薦ポイント1のタイトル）
 （推薦ポイント1の詳細説明 - 3-4文以上）
 
@@ -543,45 +681,6 @@ json）や装飾は使用しないでください。
   const errorMsg = lastError instanceof Error ? lastError.message : String(lastError);
   throw new Error(`処理に失敗しました: ${errorMsg}`);
 }
-/**
- * ファイルからテキストを抽出する
- */
-export async function extractTextFromFile(filePath: string): Promise<{
-  text: string;
-  fileType: string;
-}> {
-  try {
-    const fileExt = path.extname(filePath).toLowerCase();
-    let text = '';
-    let fileType = '';
-
-    if (fileExt === '.txt') {
-      fileType = 'テキスト';
-      text = await readTextFile(filePath);
-    } else if (fileExt === '.pdf') {
-      fileType = 'PDF';
-      text = await readPdfFile(filePath);
-    } else if (fileExt === '.docx' || fileExt === '.doc') {
-      fileType = 'Word';
-      text = await readWordFile(filePath);
-    } else if (fileExt === '.odt') {
-      fileType = 'ODT';
-      text = await readWordFile(filePath);
-    } else {
-      throw new Error(`サポートされていないファイル形式です: ${fileExt}`);
-    }
-
-    if (!text || text.trim() === '') {
-      throw new Error('ファイルが空か破損しています');
-    }
-
-    return { text, fileType };
-  } catch (error) {
-    throw error instanceof Error
-      ? error
-      : new Error("テキスト抽出中に不明なエラーが発生しました");
-  }
-}
 
 /**
  * ファイルを処理してテキストとデザイン情報を抽出する統合関数
@@ -691,6 +790,7 @@ export async function convertToPdfWithLibreOffice(filePath: string): Promise<str
     throw error;
   }
 }
+
 /**
  * メイン処理関数 - API呼び出しを1回に統合
  */
